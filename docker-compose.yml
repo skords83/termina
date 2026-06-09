@@ -5,9 +5,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Live-Reload: Code wird vom Host eingebunden
       - ./backend:/app
-      # SQLite-Datei landet auf dem Host
       - ./data:/data
     env_file:
       - .env
@@ -15,13 +13,14 @@ services:
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
     container_name: termina-frontend
     ports:
       - "5173:5173"
     volumes:
       - ./frontend:/app
-      # node_modules bleiben im Container (anonymous volume)
       - /app/node_modules
     env_file:
       - .env

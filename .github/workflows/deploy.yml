@@ -1,0 +1,45 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE_PREFIX: ghcr.io/skords83/termina
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to ghcr.io
+        run: echo "${{ secrets.CR_PAT }}" | docker login ghcr.io -u skords83 --password-stdin
+
+      - name: Build and push frontend
+        run: |
+          docker build \
+            --no-cache \
+            --build-arg VITE_API_BASE_URL=/api \
+            -t ${{ env.IMAGE_PREFIX }}/frontend:latest \
+            ./frontend
+          docker push ${{ env.IMAGE_PREFIX }}/frontend:latest
+
+      - name: Build and push backend
+        run: |
+          docker build \
+            -t ${{ env.IMAGE_PREFIX }}/backend:latest \
+            ./backend
+          docker push ${{ env.IMAGE_PREFIX }}/backend:latest
+
+      # Optional: Dockhand per Webhook ueber das neue Image informieren.
+      # Webhook-URL und Secret in GitHub Secrets hinterlegen (DOCKHAND_WEBHOOK_URL, DOCKHAND_WEBHOOK_SECRET).
+      # - name: Trigger Dockhand redeploy
+      #   run: |
+      #     curl -X POST "${{ secrets.DOCKHAND_WEBHOOK_URL }}" \
+      #       -H "X-Webhook-Secret: ${{ secrets.DOCKHAND_WEBHOOK_SECRET }}"

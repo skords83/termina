@@ -1,0 +1,29 @@
+# Produktions-Compose: referenziert fertige Images aus GHCR.
+# Kein Quellcode-Mount, kein Reload-Flag, nginx serviert das Frontend.
+#
+# Deployment via Dockhand:
+#   - Diese Datei als Stack-Quelle angeben
+#   - "Re-pull images" + "Force redeployment" aktivieren
+#   - Dockhand-Webhook in GitHub eintragen (oder GitHub Actions Webhook-Step aktivieren)
+
+services:
+  backend:
+    image: ghcr.io/skords83/termina/backend:latest
+    container_name: termina-backend
+    volumes:
+      - termina_data:/data
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/skords83/termina/frontend:latest
+    container_name: termina-frontend
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+volumes:
+  termina_data:

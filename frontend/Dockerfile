@@ -1,14 +1,17 @@
-FROM node:20-slim
-
+# Stage 1: Vite-Build
+FROM node:20-slim AS builder
 WORKDIR /app
-
-# Deps zuerst (Layer-Caching)
 COPY package.json ./
 RUN npm install
-
-# Source
 COPY . .
+# Vite-Env-Variablen werden zur Build-Zeit eingebacken
+ARG VITE_API_BASE_URL=/api
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+RUN npm run build
 
-EXPOSE 5173
-
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+# Stage 2: nginx serviert das Build-Artefakt
+FROM nginx:alpine AS production
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
