@@ -31,6 +31,7 @@ def get_events(
         occurrences = expand_event(event.raw_ical, from_, to)
         for occ in occurrences:
             occ["calendar_id"] = event.calendar_id
+            occ["description"] = event.description
             results.append(occ)
 
     results.sort(key=lambda e: e["start"])

@@ -7,6 +7,7 @@ interface Props {
   events: CalendarEvent[];
   calendars: Calendar[];
   visibleCalendarIds: Set<string>;
+  onEventClick: (event: CalendarEvent) => void;
 }
 
 const WEEKDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
@@ -48,7 +49,7 @@ interface DayEvent {
   isMultiDay: boolean;
 }
 
-export function MonthView({ year, month, events, calendars, visibleCalendarIds }: Props) {
+export function MonthView({ year, month, events, calendars, visibleCalendarIds, onEventClick }: Props) {
   const today = new Date();
 
   const calendarMap = useMemo(
@@ -174,8 +175,9 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds }
                       ]
                         .filter(Boolean)
                         .join(' ')}
-                      style={{ '--event-color': color } as React.CSSProperties}
+                      style={{ '--event-color': color, cursor: 'pointer' } as React.CSSProperties}
                       title={ev.location ? `${ev.summary}\n${ev.location}` : ev.summary}
+                      onClick={() => onEventClick(ev)}
                     >
                       {!isBlock && (
                         <span className="event-time">{formatTime(ev.start)}</span>

@@ -1,10 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from './store';
 import { useCalendars } from './hooks/useCalendars';
 import { useEvents } from './hooks/useEvents';
 import { LoginForm } from './components/LoginForm';
 import { Sidebar } from './components/Sidebar';
 import { MonthView } from './components/MonthView';
+import { EventPopup } from './components/EventPopup';
+import { CalendarEvent } from './types';
 
 const MONTHS = [
   'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
@@ -14,6 +16,8 @@ const MONTHS = [
 export default function App() {
   const { token, setToken, clearToken, activeMonth, setActiveMonth, hiddenCalendars, isCalendarVisible } =
     useStore();
+
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
 
   const { calendars } = useCalendars(token);
   const current = useMemo(() => new Date(activeMonth + 'T00:00:00'), [activeMonth]);
@@ -105,9 +109,18 @@ export default function App() {
             events={events}
             calendars={calendars}
             visibleCalendarIds={visibleCalendarIds}
+            onEventClick={setSelectedEvent}
           />
         </main>
       </div>
+
+      {selectedEvent && (
+        <EventPopup
+          event={selectedEvent}
+          calendar={calendars.find((c) => c.id === selectedEvent.calendar_id)}
+          onClose={() => setSelectedEvent(null)}
+        />
+      )}
     </div>
   );
 }
