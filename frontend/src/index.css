@@ -490,3 +490,31 @@ button {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+/* ─── Block events (all-day / multi-day) ────────────────────── */
+.event-item--block {
+  background: color-mix(in srgb, var(--event-color) 30%, transparent);
+  border-left: 2.5px solid var(--event-color);
+}
+.event-item--block:hover {
+  background: color-mix(in srgb, var(--event-color) 40%, transparent);
+}
+
+/* Continuation day (not the start): extend to left edge */
+.event-item--block.event-item--cont {
+  border-left: 2px solid color-mix(in srgb, var(--event-color) 40%, transparent);
+  border-radius: 0 3px 3px 0;
+  margin-left: -6px;
+  padding-left: 6px;
+}
+
+/* Continues to next day: extend to right edge */
+.event-item--block.event-item--continues {
+  border-radius: 3px 0 0 3px;
+  margin-right: -6px;
+}
+
+/* Both: middle of a span */
+.event-item--block.event-item--cont.event-item--continues {
+  border-radius: 0;
+}

@@ -11,14 +11,15 @@ interface Props {
 
 const WEEKDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 
-function isoDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
+function localDateStr(date: Date): string {
+  // timezone-safe: uses local year/month/day, never UTC
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function parseLocalDate(iso: string): Date {
-  // "2026-06-15" or "2026-06-15T10:00:00+02:00"
-  if (iso.length === 10) {
-    const [y, m, d] = iso.split('-').map(Number);
+  // "2026-06-15" → local midnight, never UTC-shifted
+  if (iso.length >= 10 && iso[10] !== 'T') {
+    const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
     return new Date(y, m - 1, d);
   }
   return new Date(iso);
@@ -27,6 +28,18 @@ function parseLocalDate(iso: string): Date {
 function formatTime(iso: string): string {
   const d = parseLocalDate(iso);
   return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+}
+
+// Add days to a local date without timezone drift
+function addDays(date: Date, n: number): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + n);
+}
+
+interface DayEvent {
+  ev: CalendarEvent;
+  isStart: boolean;
+  isEnd: boolean;
+  isMultiDay: boolean;
 }
 
 export function MonthView({ year, month, events, calendars, visibleCalendarIds }: Props) {
@@ -60,39 +73,70 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds }
     return result;
   }, [year, month]);
 
-  // Group events by date string
+  // Group events by date – multi-day events appear on every day they span
   const eventsByDate = useMemo(() => {
-    const map = new Map<string, CalendarEvent[]>();
+    const map = new Map<string, DayEvent[]>();
+
     for (const ev of events) {
       if (!visibleCalendarIds.has(ev.calendar_id)) continue;
-      const key = isoDate(parseLocalDate(ev.start));
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(ev);
+
+      const startDate = parseLocalDate(ev.start);
+      // For all-day events, end is exclusive in iCal (e.g. end = next day for a 1-day event)
+      // For timed events, end is the actual end time
+      let endDate = parseLocalDate(ev.end);
+
+      // Normalize: for all-day events, end is exclusive → subtract 1 day for display
+      if (ev.all_day) {
+        endDate = addDays(endDate, -1);
+      }
+
+      const startStr = localDateStr(startDate);
+      const endStr = localDateStr(endDate);
+      const isMultiDay = startStr !== endStr;
+
+      // Walk every day this event spans
+      let cursor = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+      while (localDateStr(cursor) <= endStr) {
+        const key = localDateStr(cursor);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push({
+          ev,
+          isStart: key === startStr,
+          isEnd: key === endStr,
+          isMultiDay,
+        });
+        cursor = addDays(cursor, 1);
+      }
     }
-    // Sort events per day by start time
-    for (const [, evs] of map) {
-      evs.sort((a, b) => a.start.localeCompare(b.start));
+
+    // Sort: all-day/multi-day first, then by start time
+    for (const [, dayEvs] of map) {
+      dayEvs.sort((a, b) => {
+        const aAllDay = a.ev.all_day || a.isMultiDay ? 0 : 1;
+        const bAllDay = b.ev.all_day || b.isMultiDay ? 0 : 1;
+        if (aAllDay !== bAllDay) return aAllDay - bAllDay;
+        return a.ev.start.localeCompare(b.ev.start);
+      });
     }
+
     return map;
   }, [events, visibleCalendarIds]);
 
   function isToday(date: Date) {
-    return isoDate(date) === isoDate(today);
+    return localDateStr(date) === localDateStr(today);
   }
 
   return (
     <div className="month-view">
-      {/* Header row */}
       <div className="month-header">
         {WEEKDAYS.map((d) => (
           <div key={d} className="month-weekday">{d}</div>
         ))}
       </div>
 
-      {/* Day grid */}
       <div className="month-grid">
         {cells.map(({ date, current }, i) => {
-          const key = isoDate(date);
+          const key = localDateStr(date);
           const dayEvents = eventsByDate.get(key) ?? [];
 
           return (
@@ -108,19 +152,32 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds }
             >
               <span className="day-number">{date.getDate()}</span>
               <div className="event-list">
-                {dayEvents.slice(0, 4).map((ev) => {
+                {dayEvents.slice(0, 4).map(({ ev, isStart, isEnd, isMultiDay }) => {
                   const cal = calendarMap.get(ev.calendar_id);
+                  const color = cal?.color ?? '#888';
+                  const isBlock = ev.all_day || isMultiDay;
+
                   return (
                     <div
-                      key={ev.uid}
-                      className="event-item"
-                      style={{ '--event-color': cal?.color ?? '#888' } as React.CSSProperties}
+                      key={ev.uid + key}
+                      className={[
+                        'event-item',
+                        isBlock ? 'event-item--block' : '',
+                        isBlock && !isStart ? 'event-item--cont' : '',
+                        isBlock && !isEnd ? 'event-item--continues' : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                      style={{ '--event-color': color } as React.CSSProperties}
                       title={ev.location ? `${ev.summary}\n${ev.location}` : ev.summary}
                     >
-                      {!ev.all_day && (
+                      {!isBlock && (
                         <span className="event-time">{formatTime(ev.start)}</span>
                       )}
-                      <span className="event-title">{ev.summary}</span>
+                      <span className="event-title">
+                        {/* Only show title on start day for multi-day, saves space */}
+                        {isStart || !isMultiDay ? ev.summary : ''}
+                      </span>
                     </div>
                   );
                 })}
