@@ -1,32 +1,33 @@
-"""SQLAlchemy-Engine und Session.
+"""Engine und Session-Factory.
 
-Models kommen in Phase 1. Diese Datei kann schon stehen, damit die Konfiguration
-fuer alles spaetere klar ist.
+Wird von sync.py (Scheduler-Kontext) und spaeter von den API-Routen verwendet.
+create_db_and_tables() beim App-Start aufrufen – idempotent dank checkfirst=True.
 """
 
-from collections.abc import Iterator
-
 from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
+from app.db.models import Base
 
-# SQLite braucht check_same_thread=False, weil FastAPI Worker-Threads benutzt.
-_connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+engine = create_engine(
+    settings.database_url,
+    connect_args={"check_same_thread": False},  # noetig fuer SQLite + Threads
+    echo=False,
+)
 
-engine = create_engine(settings.database_url, connect_args=_connect_args, future=True)
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-class Base(DeclarativeBase):
-    """Basis-Klasse fuer alle ORM-Modelle."""
+SessionLocal: sessionmaker[Session] = sessionmaker(
+    bind=engine,
+    autocommit=False,
+    autoflush=False,
+)
 
 
-def get_db() -> Iterator[Session]:
-    """FastAPI-Dependency, die eine Session pro Request liefert."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+def create_db_and_tables() -> None:
+    """Erstellt alle Tabellen, falls sie noch nicht existieren."""
+    Base.metadata.create_all(bind=engine, checkfirst=True)
+
+
+def get_session() -> Session:
+    """Gibt eine neue Session zurueck. Aufrufer ist verantwortlich fuer .close()."""
+    return SessionLocal()
