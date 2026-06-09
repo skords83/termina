@@ -1,65 +1,111 @@
-import { useEffect, useState } from "react";
+import { useMemo } from 'react';
+import { useStore } from './store';
+import { useCalendars } from './hooks/useCalendars';
+import { useEvents } from './hooks/useEvents';
+import { LoginForm } from './components/LoginForm';
+import { Sidebar } from './components/Sidebar';
+import { MonthView } from './components/MonthView';
 
-interface HealthResponse {
-  status: string;
-}
-
-// Leer = relativer Pfad → funktioniert hinter Traefik (termina.skords.de/api/healthz)
-// und hinter nginx-Proxy (localhost:5173/api/healthz → backend:8000/healthz)
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
-
-type State =
-  | { kind: "loading" }
-  | { kind: "ok"; data: HealthResponse }
-  | { kind: "error"; message: string };
+const MONTHS = [
+  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+];
 
 export default function App() {
-  const [state, setState] = useState<State>({ kind: "loading" });
+  const { token, setToken, clearToken, activeMonth, setActiveMonth, hiddenCalendars, isCalendarVisible } =
+    useStore();
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${API_BASE}/healthz`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return (await res.json()) as HealthResponse;
-      })
-      .then((data) => {
-        if (!cancelled) setState({ kind: "ok", data });
-      })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        if (!cancelled) setState({ kind: "error", message });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { calendars } = useCalendars(token);
+  const current = useMemo(() => new Date(activeMonth + 'T00:00:00'), [activeMonth]);
+
+  // Fetch window: full month + 1 week padding on each side
+  const { from, to } = useMemo(() => {
+    const year = current.getFullYear();
+    const month = current.getMonth();
+    const from = new Date(year, month - 1, 20).toISOString();
+    const to = new Date(year, month + 1, 10).toISOString();
+    return { from, to };
+  }, [current]);
+
+  const { events, loading: eventsLoading } = useEvents(token, from, to);
+
+  const visibleCalendarIds = useMemo(
+    () => new Set(calendars.filter((c) => isCalendarVisible(c.id)).map((c) => c.id)),
+    [calendars, hiddenCalendars]
+  );
+
+  function prevMonth() {
+    const d = new Date(current.getFullYear(), current.getMonth() - 1, 1);
+    setActiveMonth(d.toISOString().slice(0, 10));
+  }
+
+  function nextMonth() {
+    const d = new Date(current.getFullYear(), current.getMonth() + 1, 1);
+    setActiveMonth(d.toISOString().slice(0, 10));
+  }
+
+  function goToday() {
+    const d = new Date();
+    setActiveMonth(new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10));
+  }
+
+  if (!token) {
+    return <LoginForm onSuccess={setToken} />;
+  }
 
   return (
-    <main>
-      <header>
-        <h1>Termina</h1>
-        <p className="tagline">Self-hosted Kalender, Phase 0.</p>
+    <div className="app">
+      <header className="topbar">
+        <div className="topbar-left">
+          <div className="app-logo">
+            <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
+              <rect width="32" height="32" rx="8" fill="var(--accent)" />
+              <path
+                d="M8 16C8 11.582 11.582 8 16 8C20.418 8 24 11.582 24 16V22H8V16Z"
+                fill="white"
+                fillOpacity="0.9"
+              />
+              <rect x="11" y="14" width="2" height="5" rx="1" fill="var(--accent)" />
+              <rect x="15" y="12" width="2" height="7" rx="1" fill="var(--accent)" />
+              <rect x="19" y="15" width="2" height="4" rx="1" fill="var(--accent)" />
+            </svg>
+            <span className="app-name">Termina</span>
+          </div>
+        </div>
+
+        <div className="topbar-center">
+          <button className="nav-btn nav-btn--lg" onClick={prevMonth}>‹</button>
+          <h1 className="month-title">
+            {MONTHS[current.getMonth()]} {current.getFullYear()}
+          </h1>
+          <button className="nav-btn nav-btn--lg" onClick={nextMonth}>›</button>
+          <button className="today-btn" onClick={goToday}>Heute</button>
+        </div>
+
+        <div className="topbar-right">
+          {eventsLoading && <span className="sync-indicator" title="Lädt…" />}
+          <button
+            className="logout-btn"
+            onClick={clearToken}
+            title="Abmelden"
+          >
+            ⎋
+          </button>
+        </div>
       </header>
 
-      <section className="status">
-        <h2>Backend-Verbindung</h2>
-        {state.kind === "loading" && <p>Pruefe Backend unter {API_BASE} ...</p>}
-        {state.kind === "ok" && (
-          <p className="ok">
-            OK - Backend antwortet mit Status <code>{state.data.status}</code>.
-          </p>
-        )}
-        {state.kind === "error" && (
-          <p className="error">
-            Verbindung fehlgeschlagen: {state.message}
-            <br />
-            <small>
-              Erwartet wird <code>{API_BASE}/healthz</code>. Laeuft der Backend-Container?
-            </small>
-          </p>
-        )}
-      </section>
-    </main>
+      <div className="main">
+        <Sidebar calendars={calendars} />
+        <main className="content">
+          <MonthView
+            year={current.getFullYear()}
+            month={current.getMonth()}
+            events={events}
+            calendars={calendars}
+            visibleCalendarIds={visibleCalendarIds}
+          />
+        </main>
+      </div>
+    </div>
   );
 }
