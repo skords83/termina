@@ -66,14 +66,15 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
 
     logger.info("Syncing calendar: %s", db_cal.name)
 
-    # REPORT: fetch all event ETags
-    remote_etags: dict[str, str] = {}  # url → etag
+    # REPORT: fetch all event ETags + data in one go
+    remote_objects: dict[str, tuple[str, str]] = {}  # url → (etag, raw_ical)
     try:
-        results = caldav_calendar.objects_by_sync_token() if False else caldav_calendar.objects()
-        for obj in results:
+        for obj in caldav_calendar.objects(load_objects=True):
             obj_url = str(obj.url)
             obj_etag = obj.get_properties().get("{DAV:}getetag", "")
-            remote_etags[obj_url] = obj_etag
+            raw = str(obj.data) if obj.data else ""
+            if raw:
+                remote_objects[obj_url] = (obj_etag, raw)
     except Exception as exc:
         logger.error("Failed to list objects for %s: %s", cal_url, exc)
         return
@@ -86,15 +87,7 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
     # Track which UIDs are still on the server
     seen_uids: set[str] = set()
 
-    for obj_url, remote_etag in remote_etags.items():
-        # Fetch full iCal to get UID
-        try:
-            obj_data = caldav_calendar.object_by_url(obj_url)
-            raw = str(obj_data.data)
-        except Exception as exc:
-            logger.warning("Could not fetch %s: %s", obj_url, exc)
-            continue
-
+    for obj_url, (remote_etag, raw) in remote_objects.items():
         try:
             ical = ICalendar.from_ical(raw)
         except Exception as exc:
