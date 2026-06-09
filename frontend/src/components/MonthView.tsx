@@ -17,12 +17,18 @@ function localDateStr(date: Date): string {
 }
 
 function parseLocalDate(iso: string): Date {
-  // "2026-06-15" → local midnight, never UTC-shifted
-  if (iso.length >= 10 && iso[10] !== 'T') {
-    const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
-    return new Date(y, m - 1, d);
-  }
-  return new Date(iso);
+  // Parse as local time to avoid UTC-shift at timezone boundaries (MESZ = UTC+2).
+  // Backend returns naive datetimes like "2026-06-08T00:00:00" without tz suffix.
+  const datePart = iso.slice(0, 10);
+  const [y, m, d] = datePart.split('-').map(Number);
+  if (iso.length === 10) return new Date(y, m - 1, d);
+  // Has time component
+  const hasTimezone = iso.includes('+') || iso.endsWith('Z');
+  if (hasTimezone) return new Date(iso); // browser handles tz-aware strings correctly
+  // Naive datetime (no tz) → parse as local
+  const timePart = iso.slice(11, 19);
+  const [h, min, s] = timePart.split(':').map(Number);
+  return new Date(y, m - 1, d, h, min, s ?? 0);
 }
 
 function formatTime(iso: string): string {
