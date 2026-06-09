@@ -10,6 +10,12 @@ def expand_event(raw_ical: str, window_start: datetime, window_end: datetime) ->
     Gibt eine Liste von Dicts zurück, die direkt als API-Response-Objekte
     verwendet werden können.
     """
+    # Normalisiere Fenster auf naive datetimes (DB-Werte sind immer naive)
+    if window_start.tzinfo is not None:
+        window_start = window_start.replace(tzinfo=None)
+    if window_end.tzinfo is not None:
+        window_end = window_end.replace(tzinfo=None)
+
     cal = iCal.from_ical(raw_ical)
 
     master = None
