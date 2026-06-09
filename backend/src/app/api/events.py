@@ -10,7 +10,7 @@ from ..caldav.recurrence import expand_event
 router = APIRouter()
 
 
-@router.get("/api/events")
+@router.get("")
 def get_events(
     from_: datetime = Query(alias="from"),
     to: datetime = Query(),
