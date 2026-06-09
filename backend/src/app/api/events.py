@@ -1,39 +1,37 @@
 from datetime import datetime
-
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.auth import require_token
-from app.db.models import Event
-from app.db.session import get_db
+from ..db.session import get_db
+from ..db.models import Event
+from ..api.auth import require_token
+from ..caldav.recurrence import expand_event
 
-router = APIRouter(prefix="/events", tags=["events"])
-
-
-class EventOut(BaseModel):
-    uid: str
-    calendar_id: str
-    summary: str | None
-    start: datetime | None
-    end: datetime | None
-    all_day: bool
-    location: str | None
-
-    model_config = {"from_attributes": True}
+router = APIRouter()
 
 
-@router.get("", response_model=list[EventOut], dependencies=[Depends(require_token)])
-def list_events(
-    from_: datetime = Query(..., alias="from"),
-    to: datetime = Query(...),
-    calendar_id: str | None = Query(None),
+@router.get("/api/events")
+def get_events(
+    from_: datetime = Query(alias="from"),
+    to: datetime = Query(),
+    calendar_id: str | None = None,
     db: Session = Depends(get_db),
-) -> list[Event]:
-    q = db.query(Event).filter(
-        Event.start < to,
-        Event.end > from_,
-    )
-    if calendar_id is not None:
-        q = q.filter(Event.calendar_id == calendar_id)
-    return q.order_by(Event.start).all()
+    _: None = Depends(require_token),
+):
+    query = db.query(Event)
+    if calendar_id:
+        query = query.filter(Event.calendar_id == calendar_id)
+
+    # Für RRULEs ohne UNTIL/COUNT können wir start nicht sicher vorfiltern –
+    # expand_event übernimmt die Fenster-Prüfung.
+    # Einzeltermine könnten per start/end-Vergleich vorausgefiltert werden,
+    # aber bei ~10 Kalendern ist der Full-Scan akzeptabel.
+    results = []
+    for event in query.all():
+        occurrences = expand_event(event.raw_ical, from_, to)
+        for occ in occurrences:
+            occ["calendar_id"] = event.calendar_id
+            results.append(occ)
+
+    results.sort(key=lambda e: e["start"])
+    return results
