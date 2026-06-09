@@ -7,7 +7,7 @@ from ..db.models import Event
 from ..api.auth import require_token
 from ..caldav.recurrence import expand_event
 
-router = APIRouter()
+router = APIRouter(prefix="/events", tags=["events"])
 
 
 @router.get("")
