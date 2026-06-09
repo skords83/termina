@@ -18,7 +18,7 @@ interface AppState {
 }
 
 function firstOfMonth(date: Date): string {
-  return new Date(date.getFullYear(), date.getMonth(), 1).toISOString().slice(0, 10);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`;
 }
 
 export const useStore = create<AppState>()(

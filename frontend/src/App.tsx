@@ -34,19 +34,21 @@ export default function App() {
     [calendars, hiddenCalendars]
   );
 
+  function toMonthString(year: number, month: number): string {
+    return `${year}-${String(month + 1).padStart(2, '0')}-01`;
+  }
+
   function prevMonth() {
-    const d = new Date(current.getFullYear(), current.getMonth() - 1, 1);
-    setActiveMonth(d.toISOString().slice(0, 10));
+    setActiveMonth(toMonthString(current.getFullYear(), current.getMonth() - 1));
   }
 
   function nextMonth() {
-    const d = new Date(current.getFullYear(), current.getMonth() + 1, 1);
-    setActiveMonth(d.toISOString().slice(0, 10));
+    setActiveMonth(toMonthString(current.getFullYear(), current.getMonth() + 1));
   }
 
   function goToday() {
     const d = new Date();
-    setActiveMonth(new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10));
+    setActiveMonth(toMonthString(d.getFullYear(), d.getMonth()));
   }
 
   if (!token) {

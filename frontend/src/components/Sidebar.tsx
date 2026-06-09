@@ -47,19 +47,20 @@ export function Sidebar({ calendars }: Props) {
     return cells;
   }, [current]);
 
+  function toMonthString(year: number, month: number): string {
+    return `${year}-${String(month + 1).padStart(2, '0')}-01`;
+  }
+
   function prevMonth() {
-    const d = new Date(current.getFullYear(), current.getMonth() - 1, 1);
-    setActiveMonth(d.toISOString().slice(0, 10));
+    setActiveMonth(toMonthString(current.getFullYear(), current.getMonth() - 1));
   }
 
   function nextMonth() {
-    const d = new Date(current.getFullYear(), current.getMonth() + 1, 1);
-    setActiveMonth(d.toISOString().slice(0, 10));
+    setActiveMonth(toMonthString(current.getFullYear(), current.getMonth() + 1));
   }
 
   function goToDay(date: Date) {
-    const m = new Date(date.getFullYear(), date.getMonth(), 1);
-    setActiveMonth(m.toISOString().slice(0, 10));
+    setActiveMonth(toMonthString(date.getFullYear(), date.getMonth()));
   }
 
   function isToday(date: Date) {
