@@ -4,7 +4,9 @@ interface HealthResponse {
   status: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+// Leer = relativer Pfad → funktioniert hinter Traefik (termina.skords.de/api/healthz)
+// und hinter nginx-Proxy (localhost:5173/api/healthz → backend:8000/healthz)
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 type State =
   | { kind: "loading" }
