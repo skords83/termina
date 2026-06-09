@@ -12,4 +12,5 @@ export interface CalendarEvent {
   end: string;
   all_day: boolean;
   location?: string;
+  description?: string | null;
 }
