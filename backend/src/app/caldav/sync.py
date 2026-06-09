@@ -94,11 +94,18 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
             logger.warning("Could not parse iCal for %s: %s", obj_url, exc)
             continue
 
+        seen_in_file: set[str] = set()
         for component in ical.walk():
             if component.name != "VEVENT":
                 continue
 
             uid = str(component.get("UID", obj_url))
+
+            # Some clients store multiple VEVENT blocks with the same UID
+            # (expanded recurrences). Take only the master/first occurrence.
+            if uid in seen_in_file:
+                continue
+            seen_in_file.add(uid)
             seen_uids.add(uid)
 
             existing = local_events.get(uid)
