@@ -1,0 +1,1 @@
+"""CalDAV-Anbindung an Nextcloud."""

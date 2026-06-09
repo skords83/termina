@@ -1,0 +1,80 @@
+:root {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.55;
+  color-scheme: light dark;
+
+  --fg: #1e2327;
+  --fg-muted: #5f6470;
+  --bg: #fbfbf9;
+  --accent: #b6a187;
+  --ok: #2f7a4d;
+  --error: #b03030;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f0eee8;
+    --fg-muted: #9a9a92;
+    --bg: #1c1f23;
+    --accent: #c8a87f;
+    --ok: #8ed6a3;
+    --error: #ec8a8a;
+  }
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  display: grid;
+  place-items: center;
+}
+
+main {
+  width: min(40rem, calc(100vw - 2rem));
+  padding: 2rem;
+}
+
+header h1 {
+  margin: 0;
+  font-weight: 600;
+  font-size: 2.5rem;
+  letter-spacing: -0.02em;
+  color: var(--accent);
+}
+
+header .tagline {
+  margin: 0.25rem 0 2rem;
+  color: var(--fg-muted);
+}
+
+.status {
+  border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+  border-radius: 0.75rem;
+  padding: 1.25rem 1.5rem;
+}
+
+.status h2 {
+  margin-top: 0;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.status .ok {
+  color: var(--ok);
+}
+
+.status .error {
+  color: var(--error);
+}
+
+code {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  padding: 0.1em 0.4em;
+  border-radius: 0.25rem;
+  font-size: 0.95em;
+}

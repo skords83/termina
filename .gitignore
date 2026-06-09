@@ -1,0 +1,29 @@
+# Env
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Daten
+data/*
+!data/.gitkeep
+*.db
+*.db-journal
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

@@ -1,0 +1,31 @@
+services:
+  backend:
+    build: ./backend
+    container_name: termina-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Live-Reload: Code wird vom Host eingebunden
+      - ./backend:/app
+      # SQLite-Datei landet auf dem Host
+      - ./data:/data
+    env_file:
+      - .env
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --app-dir src
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: termina-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      # node_modules bleiben im Container (anonymous volume)
+      - /app/node_modules
+    env_file:
+      - .env
+    command: npm run dev -- --host 0.0.0.0
+    restart: unless-stopped
+    depends_on:
+      - backend
