@@ -6,6 +6,8 @@ import { LoginForm } from './components/LoginForm';
 import { Sidebar } from './components/Sidebar';
 import { MonthView } from './components/MonthView';
 import { EventPopup } from './components/EventPopup';
+import { EventFormModal } from './components/EventFormModal';
+import { useOptimisticStore, useMergedEvents } from './store/eventsSlice';
 import { CalendarEvent } from './types';
 
 const MONTHS = [
@@ -19,6 +21,10 @@ export default function App() {
 
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [anchorPos, setAnchorPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [editModal, setEditModal] = useState<CalendarEvent | null>(null);
+  const [createModal, setCreateModal] = useState<{ defaultDate: string } | null>(null);
+
+  const optimistic = useOptimisticStore();
 
   function handleEventClick(ev: CalendarEvent, e: React.MouseEvent) {
     e.stopPropagation();
@@ -38,7 +44,8 @@ export default function App() {
     return { from, to };
   }, [current]);
 
-  const { events, loading: eventsLoading } = useEvents(token, from, to);
+  const { events: serverEvents, loading: eventsLoading } = useEvents(token, from, to);
+  const events = useMergedEvents(serverEvents);
 
   const visibleCalendarIds = useMemo(
     () => new Set(calendars.filter((c) => isCalendarVisible(c.id)).map((c) => c.id)),
@@ -124,9 +131,41 @@ export default function App() {
       {selectedEvent && (
         <EventPopup
           event={selectedEvent}
-          calendar={calendars.find((c) => c.id === selectedEvent.calendar_id)}
+          calendarColor={calendars.find((c) => c.id === selectedEvent.calendar_id)?.color ?? '#888'}
+          calendarName={calendars.find((c) => c.id === selectedEvent.calendar_id)?.name ?? ''}
           anchorPos={anchorPos}
           onClose={() => setSelectedEvent(null)}
+          onEdit={(ev) => { setSelectedEvent(null); setEditModal(ev); }}
+          onDeleted={(uid) => {
+            optimistic.deleteOptimistic(uid);
+            setTimeout(() => optimistic.clearAll(), 6000);
+          }}
+        />
+      )}
+
+      {createModal && (
+        <EventFormModal
+          mode="create"
+          calendars={calendars}
+          defaultDate={createModal.defaultDate}
+          onClose={() => setCreateModal(null)}
+          onSaved={(_uid, ev) => {
+            optimistic.addOptimistic(ev);
+            setTimeout(() => optimistic.clearAll(), 6000);
+          }}
+        />
+      )}
+
+      {editModal && (
+        <EventFormModal
+          mode="edit"
+          calendars={calendars}
+          event={editModal}
+          onClose={() => setEditModal(null)}
+          onSaved={(_uid, ev) => {
+            optimistic.updateOptimistic(ev);
+            setTimeout(() => optimistic.clearAll(), 6000);
+          }}
         />
       )}
     </div>

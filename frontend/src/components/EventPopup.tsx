@@ -13,7 +13,7 @@
 //   onDeleted       – Event wurde gelöscht → aus lokalem State entfernen
 //   calendars       – für den Kalender-Namen (optional, alternativ calendarName)
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { deleteEvent } from '../api/write';
 import { useToast } from './Toast';
 import type { CalendarEvent, WriteError } from '../types';
@@ -22,7 +22,7 @@ interface Props {
   event: CalendarEvent;
   calendarColor: string;
   calendarName: string;
-  anchorRect: DOMRect;
+  anchorPos: { x: number; y: number };
   onClose: () => void;
   onEdit: (event: CalendarEvent) => void;
   onDeleted: (uid: string) => void;
@@ -77,7 +77,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 // ── Positionierung ────────────────────────────────────────────────────────────
 
 function computePosition(
-  anchor: DOMRect,
+  anchor: { x: number; y: number },
   popupWidth: number,
   popupHeight: number
 ): { top: number; left: number } {
@@ -85,21 +85,17 @@ function computePosition(
   const vw = window.innerWidth;
   const vh = window.innerHeight;
 
-  let left = anchor.right + MARGIN;
+  let left = anchor.x + MARGIN;
   if (left + popupWidth > vw - MARGIN) {
-    left = anchor.left - popupWidth - MARGIN;
+    left = anchor.x - popupWidth - MARGIN;
   }
-  if (left < MARGIN) {
-    left = MARGIN;
-  }
+  if (left < MARGIN) left = MARGIN;
 
-  let top = anchor.top;
+  let top = anchor.y;
   if (top + popupHeight > vh - MARGIN) {
     top = vh - popupHeight - MARGIN;
   }
-  if (top < MARGIN) {
-    top = MARGIN;
-  }
+  if (top < MARGIN) top = MARGIN;
 
   return { top, left };
 }
@@ -269,7 +265,7 @@ export function EventPopup({
   event,
   calendarColor,
   calendarName,
-  anchorRect,
+  anchorPos,
   onClose,
   onEdit,
   onDeleted,
@@ -285,8 +281,8 @@ export function EventPopup({
     const popup = popupRef.current;
     if (!popup) return;
     const { offsetWidth: w, offsetHeight: h } = popup;
-    setPos(computePosition(anchorRect, w || 288, h || 200));
-  }, [anchorRect]);
+    setPos(computePosition(anchorPos, w || 288, h || 200));
+  }, [anchorPos]);
 
   // Klick außerhalb schließt
   useEffect(() => {
