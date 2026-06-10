@@ -25,7 +25,7 @@
 //     onSaved={(uid) => { /* optimistic update */ }}
 //   />
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createEvent, updateEvent } from '../api/write';
 import { useToast } from './Toast';
 import type { CalendarEvent, CreateEventPayload, WriteError } from '../types';
@@ -381,11 +381,27 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
           etag: existingEvent!.etag!,
         });
         uid = result.uid;
-        savedEvent = { ...existingEvent!, ...payload, uid };
+        savedEvent = {
+          ...existingEvent!,
+          ...payload,
+          uid,
+          all_day: payload.all_day ?? false,
+          location: payload.location ?? undefined,
+        };
       } else {
         const result = await createEvent(payload);
         uid = result.uid;
-        savedEvent = { ...payload, uid, etag: null };
+        savedEvent = {
+          uid,
+          calendar_id: payload.calendar_id,
+          summary: payload.summary,
+          start: payload.start,
+          end: payload.end,
+          all_day: payload.all_day ?? false,
+          location: payload.location ?? undefined,
+          description: payload.description,
+          etag: null,
+        };
       }
 
       showToast(
