@@ -39,6 +39,21 @@ function highlight(text: string, query: string): React.ReactNode {
   );
 }
 
+/**
+ * Returns a ~120-char snippet of `text` centred around the first occurrence
+ * of `query`, with leading/trailing ellipses where text was cut.
+ * Returns null if `query` is not found in `text`.
+ */
+function descriptionSnippet(text: string, query: string): string | null {
+  if (!text || !query) return null;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return null;
+  const HALF = 55;
+  const start = Math.max(0, idx - HALF);
+  const end = Math.min(text.length, idx + query.length + HALF);
+  return (start > 0 ? "…" : "") + text.slice(start, end) + (end < text.length ? "…" : "");
+}
+
 export default function SearchModal({
   events,
   calendars,
@@ -144,16 +159,14 @@ export default function SearchModal({
                     )}
                     <span className="search-result-cal"> · {cal?.name}</span>
                   </div>
-                  {ev.description && (
-                    <div className="search-result-desc">
-                      {highlight(
-                        ev.description.length > 100
-                          ? ev.description.slice(0, 100) + "…"
-                          : ev.description,
-                        query
-                      )}
-                    </div>
-                  )}
+                  {(() => {
+                    const snippet = descriptionSnippet(ev.description ?? "", query);
+                    return snippet ? (
+                      <div className="search-result-desc">
+                        {highlight(snippet, query)}
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
               </div>
             );
