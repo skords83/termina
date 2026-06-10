@@ -272,6 +272,7 @@ button {
   transition: background 0.15s;
 }
 
+.cal-name {
   font-size: 13.5px;
   color: var(--text);
   white-space: nowrap;
