@@ -124,30 +124,43 @@ export default function App() {
 
   // Fetch window adapted per view
   const { from, to } = useMemo(() => {
+    // Datum-Strings OHNE toISOString() bauen – verhindert UTC-Drift bei MESZ
+    function localDateStr(d: Date): string {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}T00:00:00`;
+    }
+    function localDateStrEnd(d: Date): string {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}T23:59:59`;
+    }
     if (view === 'week') {
       const ws = getWeekStart(currentDate);
       const we = getWeekEnd(currentDate);
-      // +/- 1 day padding
       const f = new Date(ws); f.setDate(f.getDate() - 1);
       const t = new Date(we); t.setDate(t.getDate() + 1);
-      return { from: f.toISOString(), to: t.toISOString() };
+      return { from: localDateStr(f), to: localDateStrEnd(t) };
     }
     if (view === 'day') {
       const f = new Date(currentDate); f.setDate(f.getDate() - 1);
-      const t = new Date(currentDate); t.setDate(t.getDate() + 2);
-      return { from: f.toISOString(), to: t.toISOString() };
+      const t = new Date(currentDate); t.setDate(t.getDate() + 1);
+      return { from: localDateStr(f), to: localDateStrEnd(t) };
     }
     if (view === 'agenda') {
       const f = new Date(currentDate); f.setDate(f.getDate() - 1);
       const t = new Date(currentDate); t.setDate(t.getDate() + 62);
-      return { from: f.toISOString(), to: t.toISOString() };
+      return { from: localDateStr(f), to: localDateStrEnd(t) };
     }
-    // month (default) + padding
+    // month + padding
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
-    const f = new Date(year, month - 1, 20).toISOString();
-    const t = new Date(year, month + 1, 10).toISOString();
-    return { from: f, to: t };
+    return {
+      from: localDateStr(new Date(year, month - 1, 20)),
+      to: localDateStrEnd(new Date(year, month + 1, 10)),
+    };
   }, [view, currentDate]);
 
   const { events: serverEvents, loading: eventsLoading } = useEvents(token, from, to);
