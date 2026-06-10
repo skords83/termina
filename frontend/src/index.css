@@ -348,14 +348,19 @@ button {
   font-size: 12px;
 }
 
+.day-cell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  min-height: 22px;
+}
+
 .day-number {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-2);
-  text-align: right;
-  align-self: flex-end;
   line-height: 1;
-  margin-bottom: 2px;
   min-width: 22px;
   height: 22px;
   display: flex;
@@ -519,7 +524,62 @@ button {
   border-radius: 0;
 }
 
-/* ─── Event Detailpopup (Popover, kein Overlay) ──────────────── */
+
+/* ─── Day add button ─────────────────────────────────────────── */
+.day-add-btn {
+  opacity: 0;
+  color: var(--text-3);
+  font-size: 16px;
+  line-height: 1;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: opacity 0.1s, background 0.1s, color 0.1s;
+  flex-shrink: 0;
+}
+.day-cell:hover .day-add-btn {
+  opacity: 1;
+}
+.day-add-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* ─── View switcher ──────────────────────────────────────────── */
+.view-switcher {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 3px;
+}
+
+.view-btn {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  transition: background 0.1s, color 0.1s;
+  letter-spacing: -0.01em;
+}
+.view-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.view-btn--active {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.view-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .popup {
   position: fixed;
   z-index: 200;

@@ -8,6 +8,7 @@ interface Props {
   calendars: Calendar[];
   visibleCalendarIds: Set<string>;
   onEventClick: (event: CalendarEvent, e: React.MouseEvent) => void;
+  onDayClick: (dateStr: string) => void;
 }
 
 const WEEKDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
@@ -49,7 +50,7 @@ interface DayEvent {
   isMultiDay: boolean;
 }
 
-export function MonthView({ year, month, events, calendars, visibleCalendarIds, onEventClick }: Props) {
+export function MonthView({ year, month, events, calendars, visibleCalendarIds, onEventClick, onDayClick }: Props) {
   const today = new Date();
 
   const calendarMap = useMemo(
@@ -156,8 +157,16 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds, 
               ]
                 .filter(Boolean)
                 .join(' ')}
+              onClick={() => onDayClick(key)}
             >
-              <span className="day-number">{date.getDate()}</span>
+              <div className="day-cell-header">
+                <span className="day-number">{date.getDate()}</span>
+                <button
+                  className="day-add-btn"
+                  onClick={(e) => { e.stopPropagation(); onDayClick(key); }}
+                  title="Termin erstellen"
+                >+</button>
+              </div>
               <div className="event-list">
                 {dayEvents.slice(0, 4).map(({ ev, isStart, isEnd, isMultiDay }) => {
                   const cal = calendarMap.get(ev.calendar_id);

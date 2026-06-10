@@ -23,6 +23,7 @@ export default function App() {
   const [anchorPos, setAnchorPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [editModal, setEditModal] = useState<CalendarEvent | null>(null);
   const [createModal, setCreateModal] = useState<{ defaultDate: string } | null>(null);
+  const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
 
   const optimistic = useOptimisticStore();
 
@@ -103,6 +104,19 @@ export default function App() {
         </div>
 
         <div className="topbar-right">
+          <div className="view-switcher">
+            {(['month', 'week', 'day', 'agenda'] as const).map((v) => (
+              <button
+                key={v}
+                className={['view-btn', view === v ? 'view-btn--active' : ''].filter(Boolean).join(' ')}
+                onClick={() => setView(v)}
+                disabled={v !== 'month'}
+                title={v !== 'month' ? 'Noch nicht verfügbar' : undefined}
+              >
+                {{ month: 'Monat', week: 'Woche', day: 'Tag', agenda: 'Agenda' }[v]}
+              </button>
+            ))}
+          </div>
           {eventsLoading && <span className="sync-indicator" title="Lädt…" />}
           <button
             className="logout-btn"
@@ -124,6 +138,7 @@ export default function App() {
             calendars={calendars}
             visibleCalendarIds={visibleCalendarIds}
             onEventClick={handleEventClick}
+            onDayClick={(dateStr) => setCreateModal({ defaultDate: dateStr })}
           />
         </main>
       </div>
