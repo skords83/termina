@@ -376,7 +376,7 @@ export default function App() {
           calendars={calendars}
           defaultCalendarId={calendars.find((c) => c.name === 'Persönlich')?.id}
           onConfirm={async (parsed) => {
-            const ev = await createEvent(token!, {
+            const { uid } = await createEvent({
               calendar_id: parsed.calendar_id,
               summary: parsed.summary,
               start: parsed.start,
@@ -384,7 +384,17 @@ export default function App() {
               all_day: parsed.all_day,
               location: parsed.location,
             });
-            optimistic.addOptimistic(ev);
+            optimistic.addOptimistic({
+              uid,
+              calendar_id: parsed.calendar_id,
+              summary: parsed.summary,
+              start: parsed.start,
+              end: parsed.end,
+              all_day: parsed.all_day,
+              location: parsed.location ?? null,
+              etag: null,
+              description: null,
+            });
             setTimeout(() => optimistic.clearAll(), 6000);
           }}
           onClose={() => setShowNatural(false)}

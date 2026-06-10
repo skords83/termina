@@ -54,7 +54,7 @@ function toMinutes(date: Date): number {
 }
 
 const WEEKDAYS_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-const WEEKDAYS_LONG = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
+// WEEKDAYS_LONG removed (unused)
 
 export default function WeekView({
   currentDate,
@@ -66,7 +66,7 @@ export default function WeekView({
   const weekStart = getWeekStart(currentDate);
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const today = new Date();
-  const scrollRef = useRef<HTMLDivElement>(null);
+
   const calMap = useMemo(() => {
     const m: Record<string, Calendar> = {};
     calendars.forEach((c) => (m[c.id] = c));
@@ -198,7 +198,7 @@ export default function WeekView({
       {hasAllDay && (
         <div className="week-allday-row">
           <div className="week-time-gutter week-allday-label">ganztägig</div>
-          {days.map((day, i) => (
+          {days.map((_day, i) => (
             <div key={i} className="week-allday-cell">
               {allDayByDay[i].map((ev) => {
                 const cal = calMap[ev.calendar_id];
