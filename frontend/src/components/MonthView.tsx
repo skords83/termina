@@ -7,7 +7,7 @@ interface Props {
   events: CalendarEvent[];
   calendars: Calendar[];
   visibleCalendarIds: Set<string>;
-  onEventClick: (event: CalendarEvent) => void;
+  onEventClick: (event: CalendarEvent, e: React.MouseEvent) => void;
 }
 
 const WEEKDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
@@ -177,7 +177,7 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds, 
                         .join(' ')}
                       style={{ '--event-color': color, cursor: 'pointer' } as React.CSSProperties}
                       title={ev.location ? `${ev.summary}\n${ev.location}` : ev.summary}
-                      onClick={() => onEventClick(ev)}
+                      onClick={(e) => onEventClick(ev, e)}
                     >
                       {!isBlock && (
                         <span className="event-time">{formatTime(ev.start)}</span>

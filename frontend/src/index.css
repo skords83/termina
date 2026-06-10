@@ -519,26 +519,17 @@ button {
   border-radius: 0;
 }
 
-/* ─── Event Detailpopup ──────────────────────────────────────── */
-.popup-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(3px);
-}
-
+/* ─── Event Detailpopup (Popover, kein Overlay) ──────────────── */
 .popup {
+  position: fixed;
+  z-index: 200;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  width: min(420px, 92vw);
+  width: 320px;
   overflow: hidden;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
-  animation: popup-in 0.14s ease;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.3);
+  animation: popup-in 0.12s ease;
 }
 
 @keyframes popup-in {

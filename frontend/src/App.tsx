@@ -18,6 +18,13 @@ export default function App() {
     useStore();
 
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+  const [anchorPos, setAnchorPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  function handleEventClick(ev: CalendarEvent, e: React.MouseEvent) {
+    e.stopPropagation();
+    setAnchorPos({ x: e.clientX, y: e.clientY });
+    setSelectedEvent(ev);
+  }
 
   const { calendars } = useCalendars(token);
   const current = useMemo(() => new Date(activeMonth + 'T00:00:00'), [activeMonth]);
@@ -109,7 +116,7 @@ export default function App() {
             events={events}
             calendars={calendars}
             visibleCalendarIds={visibleCalendarIds}
-            onEventClick={setSelectedEvent}
+            onEventClick={handleEventClick}
           />
         </main>
       </div>
@@ -118,6 +125,7 @@ export default function App() {
         <EventPopup
           event={selectedEvent}
           calendar={calendars.find((c) => c.id === selectedEvent.calendar_id)}
+          anchorPos={anchorPos}
           onClose={() => setSelectedEvent(null)}
         />
       )}
