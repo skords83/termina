@@ -13,4 +13,36 @@ export interface CalendarEvent {
   all_day: boolean;
   location?: string;
   description?: string | null;
+  etag?: string | null;
 }
+
+export interface CreateEventPayload {
+  calendar_id: string;
+  summary: string;
+  start: string;
+  end: string;
+  all_day?: boolean;
+  location?: string | null;
+  description?: string | null;
+}
+
+export interface UpdateEventPayload {
+  etag: string;
+  summary: string;
+  start: string;
+  end: string;
+  all_day?: boolean;
+  location?: string | null;
+  description?: string | null;
+}
+
+export interface DeleteEventPayload {
+  etag: string;
+}
+
+export type WriteError =
+  | { type: 'conflict' }
+  | { type: 'not_found' }
+  | { type: 'nextcloud_down' }
+  | { type: 'auth' }
+  | { type: 'unknown'; status: number };

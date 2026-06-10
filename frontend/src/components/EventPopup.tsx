@@ -1,160 +1,419 @@
-import { useEffect, useRef } from 'react';
-import { CalendarEvent, Calendar } from '../types';
+// frontend/src/components/EventPopup.tsx
+//
+// Popover-Karte direkt am Event.
+// Neu in Phase 5: "Bearbeiten" und "Löschen" Buttons.
+//
+// Props:
+//   event           – CalendarEvent (inkl. etag aus Phase 5)
+//   calendarColor   – Hex-Farbe des Kalenders
+//   calendarName    – Name des Kalenders
+//   anchorRect      – DOMRect des geklickten EventItem (für Positionierung)
+//   onClose         – Popup schließen
+//   onEdit          – Bearbeiten-Modal öffnen
+//   onDeleted       – Event wurde gelöscht → aus lokalem State entfernen
+//   calendars       – für den Kalender-Namen (optional, alternativ calendarName)
+
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { deleteEvent } from '../api/write';
+import { useToast } from './Toast';
+import type { CalendarEvent, WriteError } from '../types';
 
 interface Props {
   event: CalendarEvent;
-  calendar: Calendar | undefined;
-  anchorPos: { x: number; y: number };
+  calendarColor: string;
+  calendarName: string;
+  anchorRect: DOMRect;
   onClose: () => void;
+  onEdit: (event: CalendarEvent) => void;
+  onDeleted: (uid: string) => void;
 }
 
-function parseLocalDate(iso: string): Date {
-  const datePart = iso.slice(0, 10);
-  const [y, m, d] = datePart.split('-').map(Number);
-  if (iso.length === 10) return new Date(y, m - 1, d);
-  const hasTimezone = iso.includes('+') || iso.endsWith('Z');
-  if (hasTimezone) return new Date(iso);
-  const timePart = iso.slice(11, 19);
-  const [h, min, s] = timePart.split(':').map(Number);
-  return new Date(y, m - 1, d, h, min, s ?? 0);
+// ── Formatierung ──────────────────────────────────────────────────────────────
+
+function formatDateTime(start: string, end: string, allDay: boolean): string {
+  if (allDay) {
+    const s = start.slice(0, 10);
+    const e = end.slice(0, 10);
+    if (s === e) {
+      return formatDate(s);
+    }
+    return `${formatDate(s)} – ${formatDate(e)}`;
+  }
+
+  const sd = parseLocal(start);
+  const ed = parseLocal(end);
+
+  const dateStr = formatDate(start.slice(0, 10));
+  const timeStr = `${pad(sd.getHours())}:${pad(sd.getMinutes())} – ${pad(ed.getHours())}:${pad(ed.getMinutes())}`;
+
+  // Gleicher Tag?
+  if (start.slice(0, 10) === end.slice(0, 10)) {
+    return `${dateStr}, ${timeStr}`;
+  }
+  return `${dateStr} ${pad(sd.getHours())}:${pad(sd.getMinutes())} – ${formatDate(end.slice(0, 10))} ${pad(ed.getHours())}:${pad(ed.getMinutes())}`;
 }
 
-function formatDate(iso: string): string {
-  return parseLocalDate(iso).toLocaleDateString('de-DE', {
-    weekday: 'long',
+function parseLocal(isoStr: string): Date {
+  if (!isoStr.endsWith('Z') && !isoStr.includes('+')) {
+    // Naive string → als lokale Zeit parsen
+    return new Date(isoStr.replace('T', 'T'));
+  }
+  return new Date(isoStr);
+}
+
+function formatDate(dateStr: string): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const d = new Date(year, month - 1, day);
+  return d.toLocaleDateString('de-DE', {
+    weekday: 'short',
     day: 'numeric',
-    month: 'long',
-    year: 'numeric',
+    month: 'short',
+    year: d.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined,
   });
 }
 
-function formatTime(iso: string): string {
-  return parseLocalDate(iso).toLocaleTimeString('de-DE', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+const pad = (n: number) => String(n).padStart(2, '0');
 
-function localDateStr(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
+// ── Positionierung ────────────────────────────────────────────────────────────
 
-const POPOVER_W = 320;
-const POPOVER_MAX_H = 400;
-const GAP = 8; // px between cursor and popover
-
-function computePosition(x: number, y: number): React.CSSProperties {
+function computePosition(
+  anchor: DOMRect,
+  popupWidth: number,
+  popupHeight: number
+): { top: number; left: number } {
+  const MARGIN = 8;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
 
-  // Prefer right of click, flip left if too close to right edge
-  let left = x + GAP;
-  if (left + POPOVER_W > vw - 12) left = x - POPOVER_W - GAP;
+  let left = anchor.right + MARGIN;
+  if (left + popupWidth > vw - MARGIN) {
+    left = anchor.left - popupWidth - MARGIN;
+  }
+  if (left < MARGIN) {
+    left = MARGIN;
+  }
 
-  // Prefer below click, flip up if too close to bottom
-  let top = y + GAP;
-  if (top + POPOVER_MAX_H > vh - 12) top = y - POPOVER_MAX_H - GAP;
+  let top = anchor.top;
+  if (top + popupHeight > vh - MARGIN) {
+    top = vh - popupHeight - MARGIN;
+  }
+  if (top < MARGIN) {
+    top = MARGIN;
+  }
 
-  // Clamp to viewport
-  left = Math.max(8, Math.min(left, vw - POPOVER_W - 8));
-  top  = Math.max(8, top);
-
-  return { left, top };
+  return { top, left };
 }
 
-export function EventPopup({ event, calendar, anchorPos, onClose }: Props) {
-  const ref = useRef<HTMLDivElement>(null);
-  const color = calendar?.color ?? '#888';
+// ── Styles ────────────────────────────────────────────────────────────────────
 
+const S = {
+  popup: (top: number, left: number) => ({
+    position: 'fixed' as const,
+    top,
+    left,
+    zIndex: 900,
+    background: '#1e1e1e',
+    border: '1px solid #2e2e2e',
+    borderRadius: '0.625rem',
+    width: '18rem',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+    fontFamily: 'DM Sans, sans-serif',
+    color: '#e8e6e3',
+    overflow: 'hidden',
+    animation: 'popupIn 0.15s ease',
+  }),
+  colorBar: (color: string) => ({
+    height: '3px',
+    background: color,
+  }),
+  body: {
+    padding: '0.875rem 1rem',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '0.5rem',
+  },
+  header: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: '0.5rem',
+  },
+  summary: {
+    fontSize: '0.9375rem',
+    fontWeight: 600,
+    lineHeight: 1.3,
+    color: '#f0eeeb',
+    letterSpacing: '-0.01em',
+    flex: 1,
+  },
+  closeBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#555',
+    fontSize: '1.125rem',
+    cursor: 'pointer',
+    lineHeight: 1,
+    padding: '0.0625rem',
+    flexShrink: 0,
+    borderRadius: '0.25rem',
+  },
+  metaRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '0.5rem',
+    fontSize: '0.8125rem',
+    color: '#999',
+    lineHeight: 1.4,
+  },
+  metaIcon: {
+    fontSize: '0.75rem',
+    marginTop: '0.125rem',
+    flexShrink: 0,
+    color: '#666',
+    width: '0.875rem',
+    textAlign: 'center' as const,
+  },
+  calDot: (color: string) => ({
+    display: 'inline-block',
+    width: '0.5rem',
+    height: '0.5rem',
+    borderRadius: '50%',
+    background: color,
+    marginTop: '0.25rem',
+    flexShrink: 0,
+  }),
+  descriptionText: {
+    fontSize: '0.8125rem',
+    color: '#aaa',
+    lineHeight: 1.5,
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-word' as const,
+  },
+  divider: {
+    height: '1px',
+    background: '#262626',
+    margin: '0.25rem 0',
+  },
+  actions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '0.375rem',
+    paddingTop: '0.125rem',
+  },
+  btnEdit: {
+    background: 'none',
+    border: '1px solid #2e2e2e',
+    borderRadius: '0.375rem',
+    color: '#aaa',
+    padding: '0.3125rem 0.625rem',
+    fontSize: '0.8125rem',
+    fontFamily: 'DM Sans, sans-serif',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.3rem',
+  },
+  btnDelete: {
+    background: 'none',
+    border: '1px solid #3a1a1a',
+    borderRadius: '0.375rem',
+    color: '#c46a6a',
+    padding: '0.3125rem 0.625rem',
+    fontSize: '0.8125rem',
+    fontFamily: 'DM Sans, sans-serif',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.3rem',
+  },
+  btnDeleteConfirm: {
+    background: '#5a1f1f',
+    border: '1px solid #8b3030',
+    borderRadius: '0.375rem',
+    color: '#e88',
+    padding: '0.3125rem 0.625rem',
+    fontSize: '0.8125rem',
+    fontFamily: 'DM Sans, sans-serif',
+    cursor: 'pointer',
+    fontWeight: 500,
+  },
+  btnDeleteLoading: {
+    opacity: 0.5,
+    cursor: 'not-allowed',
+    background: 'none',
+    border: '1px solid #3a1a1a',
+    borderRadius: '0.375rem',
+    color: '#c46a6a',
+    padding: '0.3125rem 0.625rem',
+    fontSize: '0.8125rem',
+    fontFamily: 'DM Sans, sans-serif',
+  },
+};
+
+// Animation einmalig injizieren
+if (typeof document !== 'undefined' && !document.getElementById('popup-style')) {
+  const style = document.createElement('style');
+  style.id = 'popup-style';
+  style.textContent = `
+    @keyframes popupIn {
+      from { opacity: 0; transform: scale(0.96); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// ── Komponente ────────────────────────────────────────────────────────────────
+
+export function EventPopup({
+  event,
+  calendarColor,
+  calendarName,
+  anchorRect,
+  onClose,
+  onEdit,
+  onDeleted,
+}: Props) {
+  const { showToast } = useToast();
+  const popupRef = useRef<HTMLDivElement>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+
+  // Position nach Mount berechnen (wenn DOM-Größe bekannt)
   useEffect(() => {
-    function onMouseDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('mousedown', onMouseDown);
-    document.addEventListener('keydown', onKey);
+    const popup = popupRef.current;
+    if (!popup) return;
+    const { offsetWidth: w, offsetHeight: h } = popup;
+    setPos(computePosition(anchorRect, w || 288, h || 200));
+  }, [anchorRect]);
+
+  // Klick außerhalb schließt
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    // Timeout damit der initial-Click das Popup nicht sofort schließt
+    const id = setTimeout(() => document.addEventListener('mousedown', handler), 50);
     return () => {
-      document.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('keydown', onKey);
+      clearTimeout(id);
+      document.removeEventListener('mousedown', handler);
     };
   }, [onClose]);
 
-  const startDate = parseLocalDate(event.start);
-  const endDate = parseLocalDate(event.end);
+  // Esc schließt
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
 
-  const displayEnd = event.all_day
-    ? new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate() - 1)
-    : endDate;
+  const handleDelete = useCallback(async () => {
+    if (!event.etag) {
+      showToast('Kein ETag – Termin kann nicht gelöscht werden', 'error');
+      return;
+    }
+    setDeleting(true);
+    try {
+      await deleteEvent(event.uid, { etag: event.etag });
+      showToast('Termin gelöscht', 'success');
+      onDeleted(event.uid);
+      onClose();
+    } catch (err) {
+      const writeErr = err as WriteError;
+      if (writeErr.type === 'conflict') {
+        showToast('Termin wurde extern geändert – bitte Seite neu laden.', 'warning');
+      } else if (writeErr.type === 'nextcloud_down') {
+        showToast('Nextcloud nicht erreichbar – Termin konnte nicht gelöscht werden.', 'error');
+      } else {
+        showToast('Fehler beim Löschen.', 'error');
+      }
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  }, [event, onDeleted, onClose, showToast]);
 
-  const sameDay = localDateStr(startDate) === localDateStr(displayEnd);
-
-  let dateLabel: string;
-  if (event.all_day) {
-    dateLabel = sameDay
-      ? formatDate(event.start)
-      : `${formatDate(event.start)} – ${formatDate(localDateStr(displayEnd))}`;
-  } else {
-    const timeStr = `${formatTime(event.start)} – ${formatTime(event.end)}`;
-    dateLabel = sameDay
-      ? `${formatDate(event.start)}, ${timeStr}`
-      : `${formatDate(event.start)}, ${formatTime(event.start)} – ${formatDate(event.end)}, ${formatTime(event.end)}`;
-  }
-
-  const posStyle = computePosition(anchorPos.x, anchorPos.y);
+  const timeStr = formatDateTime(event.start, event.end, event.all_day);
 
   return (
-    <div
-      className="popup"
-      ref={ref}
-      role="dialog"
-      aria-modal="true"
-      style={posStyle}
-    >
-      <div className="popup-bar" style={{ background: color }} />
-
-      <div className="popup-header">
-        <span className="popup-title">{event.summary ?? '(kein Titel)'}</span>
-        <button className="popup-close" onClick={onClose} aria-label="Schließen">
-          ×
-        </button>
-      </div>
-
-      <div className="popup-meta">
-        <div className="popup-row">
-          <svg className="popup-icon-svg" viewBox="0 0 16 16" fill="none">
-            <rect x="2" y="3" width="12" height="11" rx="2" stroke="currentColor" strokeWidth="1.4"/>
-            <path d="M5 2v2M11 2v2M2 7h12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-          </svg>
-          <span>{dateLabel}</span>
+    <div ref={popupRef} style={S.popup(pos.top, pos.left)}>
+      <div style={S.colorBar(calendarColor)} />
+      <div style={S.body}>
+        {/* Titel + Schließen */}
+        <div style={S.header}>
+          <span style={S.summary}>{event.summary}</span>
+          <button style={S.closeBtn} onClick={onClose} aria-label="Schließen">×</button>
         </div>
 
+        {/* Zeitangabe */}
+        <div style={S.metaRow}>
+          <span style={S.metaIcon}>◷</span>
+          <span>{timeStr}</span>
+        </div>
+
+        {/* Kalender */}
+        <div style={S.metaRow}>
+          <span style={S.calDot(calendarColor)} />
+          <span>{calendarName}</span>
+        </div>
+
+        {/* Ort */}
         {event.location && (
-          <div className="popup-row">
-            <svg className="popup-icon-svg" viewBox="0 0 16 16" fill="none">
-              <path d="M8 1.5C5.515 1.5 3.5 3.515 3.5 6c0 3.5 4.5 8.5 4.5 8.5s4.5-5 4.5-8.5C12.5 3.515 10.485 1.5 8 1.5Z" stroke="currentColor" strokeWidth="1.4"/>
-              <circle cx="8" cy="6" r="1.5" stroke="currentColor" strokeWidth="1.3"/>
-            </svg>
+          <div style={S.metaRow}>
+            <span style={S.metaIcon}>⌖</span>
             <span>{event.location}</span>
           </div>
         )}
 
-        {calendar && (
-          <div className="popup-row">
-            <span className="popup-cal-dot" style={{ background: color }} />
-            <span className="popup-cal-name">{calendar.name}</span>
-          </div>
+        {/* Beschreibung */}
+        {event.description && (
+          <>
+            <div style={S.divider} />
+            <p style={S.descriptionText}>{event.description}</p>
+          </>
         )}
 
-        {event.description && (
-          <div className="popup-row popup-description">
-            <svg className="popup-icon-svg" viewBox="0 0 16 16" fill="none" style={{ marginTop: 2 }}>
-              <path d="M3 4h10M3 7h10M3 10h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-            </svg>
-            <span>{event.description}</span>
-          </div>
-        )}
+        {/* Aktions-Buttons */}
+        <div style={S.divider} />
+        <div style={S.actions}>
+          {confirmDelete ? (
+            <>
+              <button
+                style={S.btnEdit}
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+              >
+                Abbrechen
+              </button>
+              <button
+                style={deleting ? S.btnDeleteLoading : S.btnDeleteConfirm}
+                onClick={handleDelete}
+                disabled={deleting}
+              >
+                {deleting ? 'Löschen…' : 'Wirklich löschen'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                style={S.btnEdit}
+                onClick={() => { onClose(); onEdit(event); }}
+              >
+                ✎ Bearbeiten
+              </button>
+              <button
+                style={S.btnDelete}
+                onClick={() => setConfirmDelete(true)}
+              >
+                ✕ Löschen
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
