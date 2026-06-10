@@ -41,8 +41,13 @@ jobs:
             ./backend
           docker push ${{ env.IMAGE_PREFIX }}/backend:latest
 
-      # Optional: Dockhand per Webhook ueber das neue Image informieren.
-      # - name: Trigger Dockhand redeploy
-      #   run: |
-      #     curl -X POST "${{ secrets.DOCKHAND_WEBHOOK_URL }}" \
-      #       -H "X-Webhook-Secret: ${{ secrets.DOCKHAND_WEBHOOK_SECRET }}"
+      - name: Redeploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /app/data/stacks/VPS/ter*
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
