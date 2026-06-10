@@ -313,8 +313,8 @@ button {
   flex: 1;
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  grid-auto-rows: 1fr;
-  overflow: hidden;
+  grid-auto-rows: minmax(110px, 1fr);
+  overflow-y: auto;
 }
 
 /* Day Cell */
@@ -384,7 +384,7 @@ button {
   align-items: center;
   gap: 4px;
   border-radius: 3px;
-  padding: 2px 5px;
+  padding: 1px 5px;
   background: color-mix(in srgb, var(--event-color) 18%, transparent);
   border-left: 2.5px solid var(--event-color);
   overflow: hidden;
@@ -406,7 +406,7 @@ button {
 }
 
 .event-title {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -419,6 +419,16 @@ button {
   color: var(--text-3);
   padding: 1px 4px;
   font-weight: 500;
+}
+
+.event-more--clickable {
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.1s, color 0.1s;
+}
+.event-more--clickable:hover {
+  background: var(--bg-hover);
+  color: var(--text-2);
 }
 
 /* ─── Login ──────────────────────────────────────────────────── */

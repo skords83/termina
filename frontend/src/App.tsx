@@ -297,6 +297,10 @@ export default function App() {
               visibleCalendarIds={visibleCalendarIds}
               onEventClick={handleEventClickMouse}
               onDayClick={(dateStr) => setCreateModal({ defaultDate: dateStr })}
+              onMoreClick={(dateStr) => {
+                setCurrentDate(new Date(dateStr + 'T00:00:00'));
+                setView('day');
+              }}
             />
           )}
           {view === 'week' && (

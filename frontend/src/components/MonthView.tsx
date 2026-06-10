@@ -9,6 +9,7 @@ interface Props {
   visibleCalendarIds: Set<string>;
   onEventClick: (event: CalendarEvent, e: React.MouseEvent) => void;
   onDayClick: (dateStr: string) => void;
+  onMoreClick?: (dateStr: string) => void;
 }
 
 const WEEKDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
@@ -50,7 +51,7 @@ interface DayEvent {
   isMultiDay: boolean;
 }
 
-export function MonthView({ year, month, events, calendars, visibleCalendarIds, onEventClick, onDayClick }: Props) {
+export function MonthView({ year, month, events, calendars, visibleCalendarIds, onEventClick, onDayClick, onMoreClick }: Props) {
   const today = new Date();
 
   const calendarMap = useMemo(
@@ -107,16 +108,12 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds, 
       while (localDateStr(cursor) <= endStr) {
         const key = localDateStr(cursor);
         if (!map.has(key)) map.set(key, []);
-        // Deduplizieren: gleiche uid darf pro Tag nur einmal erscheinen (RRULE-Instanzen)
-        const existing = map.get(key)!;
-        if (!existing.some((d) => d.ev.uid === ev.uid)) {
-          existing.push({
-            ev,
-            isStart: key === startStr,
-            isEnd: key === endStr,
-            isMultiDay,
-          });
-        }
+        map.get(key)!.push({
+          ev,
+          isStart: key === startStr,
+          isEnd: key === endStr,
+          isMultiDay,
+        });
         cursor = addDays(cursor, 1);
       }
     }
@@ -172,7 +169,7 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds, 
                 >+</button>
               </div>
               <div className="event-list">
-                {dayEvents.slice(0, 4).map(({ ev, isStart, isEnd, isMultiDay }) => {
+                {dayEvents.slice(0, 6).map(({ ev, isStart, isEnd, isMultiDay }) => {
                   const cal = calendarMap.get(ev.calendar_id);
                   const color = cal?.color ?? '#888';
                   const isBlock = ev.all_day || isMultiDay;
@@ -202,8 +199,13 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds, 
                     </div>
                   );
                 })}
-                {dayEvents.length > 4 && (
-                  <div className="event-more">+{dayEvents.length - 4} weitere</div>
+                {dayEvents.length > 6 && (
+                  <div
+                    className="event-more event-more--clickable"
+                    onClick={(e) => { e.stopPropagation(); onMoreClick?.(key); }}
+                  >
+                    +{dayEvents.length - 6} weitere
+                  </div>
                 )}
               </div>
             </div>
