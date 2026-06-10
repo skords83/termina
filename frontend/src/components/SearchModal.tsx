@@ -140,7 +140,7 @@ export default function SearchModal({
             const color = cal?.color || "#888";
             return (
               <div
-                key={ev.uid}
+                key={`${ev.uid}_${ev.start}`}
                 className="search-result"
                 onClick={(e) =>
                   onEventClick(ev, (e.currentTarget as HTMLElement).getBoundingClientRect())
