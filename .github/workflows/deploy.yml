@@ -48,6 +48,6 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /app/data/stacks/VPS/ter*
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
+            cd /var/lib/docker/volumes/docker_dockhand_data/_data/stacks/VPS/termina
+            docker compose pull
+            docker compose up -d
