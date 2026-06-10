@@ -44,7 +44,7 @@ class EventDelete(BaseModel):
 
 # ── GET ───────────────────────────────────────────────────────────────────────
 
-@router.get("/api/events")
+@router.get("/events")
 def get_events(
     from_: datetime = Query(alias="from"),
     to: datetime = Query(),
@@ -72,7 +72,7 @@ def get_events(
 
 # ── POST: Erstellen ───────────────────────────────────────────────────────────
 
-@router.post("/api/events", status_code=201)
+@router.post("/events", status_code=201)
 def post_event(
     body: EventCreate,
     db: Session = Depends(get_db),
@@ -103,7 +103,7 @@ def post_event(
 
 # ── PUT: Bearbeiten ───────────────────────────────────────────────────────────
 
-@router.put("/api/events/{uid}")
+@router.put("/events/{uid}")
 def put_event(
     uid: str,
     body: EventUpdate,
@@ -137,7 +137,7 @@ def put_event(
 
 # ── DELETE: Löschen ───────────────────────────────────────────────────────────
 
-@router.delete("/api/events/{uid}", status_code=204)
+@router.delete("/events/{uid}", status_code=204)
 def delete_event_endpoint(
     uid: str,
     body: EventDelete,
