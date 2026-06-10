@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.auth import require_token
-from app.caldav.write import create_event, update_event, delete_event, ConflictError
+from app.caldav.write import create_event, update_event, delete_event, ConflictError, CalDAVTimeoutError
 from app.caldav.sync import run_sync
 from app.db.models import Event
 from app.db.session import get_db
@@ -90,6 +90,8 @@ def post_event(
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except CalDAVTimeoutError as e:
+        raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
     # Sofort re-synchen damit das neue Event in der DB landet
     run_sync()
@@ -130,6 +132,8 @@ def put_event(
         raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except CalDAVTimeoutError as e:
+        raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
     run_sync()
     return {"uid": uid}
@@ -158,5 +162,7 @@ def delete_event_endpoint(
         raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except CalDAVTimeoutError as e:
+        raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
     run_sync()
