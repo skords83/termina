@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from icalendar import Calendar, Event as ICalEvent
 from caldav import DAVClient
+from caldav.objects import CalendarObjectResource
 
 from app.config import settings
 
@@ -34,12 +35,31 @@ def _find_caldav_calendar(client: DAVClient, calendar_id: str):
 
 
 def _find_caldav_event(cal, uid: str):
+    """Event per direktem URL-Lookup holen (schnell).
+
+    Nextcloud legt Events unter <kalender-url>/<uid>.ics ab.
+    Falls das fehlschlägt (anderer Server, andere Konvention) wird auf
+    den langsamen Fallback (Iteration aller Objekte) zurückgegriffen.
+    """
+    # Schneller Pfad: URL direkt konstruieren
+    try:
+        event_url = str(cal.url).rstrip("/") + f"/{uid}.ics"
+        obj = CalendarObjectResource(client=cal.client, url=event_url)
+        obj.load()
+        return obj
+    except Exception:
+        pass
+
+    # Langsamer Fallback: alle Objekte iterieren
     for obj in cal.objects(load_objects=True):
-        parsed = Calendar.from_ical(obj.data)
-        for component in parsed.walk():
-            if component.name == "VEVENT":
-                if str(component.get("uid", "")) == uid:
-                    return obj
+        try:
+            parsed = Calendar.from_ical(obj.data)
+            for component in parsed.walk():
+                if component.name == "VEVENT":
+                    if str(component.get("uid", "")) == uid:
+                        return obj
+        except Exception:
+            continue
     return None
 
 
