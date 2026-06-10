@@ -256,4 +256,8 @@ def delete_event_endpoint(
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
+    # Lokal sofort entfernen, damit refetches das Event nicht wieder zeigen
+    db.delete(event)
+    db.commit()
+
     background.add_task(run_sync)
