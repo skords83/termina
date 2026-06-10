@@ -65,14 +65,21 @@ export default function AgendaView({
       const d = new Date(startDate);
       d.setDate(d.getDate() + i);
 
+      const seen = new Set<string>();
       const dayEvents = events
         .filter((ev) => {
           const s = parseLocalDate(ev.start);
+          let matches = false;
           if (ev.all_day) {
             const end = parseLocalDate(ev.end);
-            return s <= d && d < end;
+            matches = s <= d && d < end;
+          } else {
+            matches = sameDay(s, d);
           }
-          return sameDay(s, d);
+          if (!matches) return false;
+          if (seen.has(ev.uid)) return false;
+          seen.add(ev.uid);
+          return true;
         })
         .sort((a, b) => {
           if (a.all_day && !b.all_day) return -1;

@@ -107,12 +107,16 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds, 
       while (localDateStr(cursor) <= endStr) {
         const key = localDateStr(cursor);
         if (!map.has(key)) map.set(key, []);
-        map.get(key)!.push({
-          ev,
-          isStart: key === startStr,
-          isEnd: key === endStr,
-          isMultiDay,
-        });
+        // Deduplizieren: gleiche uid darf pro Tag nur einmal erscheinen (RRULE-Instanzen)
+        const existing = map.get(key)!;
+        if (!existing.some((d) => d.ev.uid === ev.uid)) {
+          existing.push({
+            ev,
+            isStart: key === startStr,
+            isEnd: key === endStr,
+            isMultiDay,
+          });
+        }
         cursor = addDays(cursor, 1);
       }
     }

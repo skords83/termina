@@ -89,7 +89,7 @@ export default function WeekView({
     timedEvents.forEach((ev) => {
       const evStart = parseLocalDate(ev.start);
       days.forEach((day, i) => {
-        if (sameDay(evStart, day)) {
+        if (sameDay(evStart, day) && !byDay[i].some((e) => e.uid === ev.uid)) {
           byDay[i].push(ev);
         }
       });
@@ -103,7 +103,7 @@ export default function WeekView({
       const evStart = parseLocalDate(ev.start);
       const evEnd = parseLocalDate(ev.end);
       days.forEach((day, i) => {
-        if (evStart <= day && day < evEnd) {
+        if (evStart <= day && day < evEnd && !byDay[i].some((e) => e.uid === ev.uid)) {
           byDay[i].push(ev);
         }
       });
