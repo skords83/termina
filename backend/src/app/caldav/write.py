@@ -44,11 +44,12 @@ def _find_caldav_event(cal, uid: str):
 
 
 def _get_etag(obj) -> str | None:
-    try:
-        props = obj.get_properties(["{DAV:}getetag"])
-        return props.get("{DAV:}getetag")
-    except Exception:
-        return None
+    """Liest den ETag eines CalDAV-Objekts.
+
+    Die caldav-Lib stellt den ETag als Attribut bereit; get_properties() crasht
+    bei Nextcloud mit einem internen XML-Bug.
+    """
+    return getattr(obj, "etag", None)
 
 
 def _make_ical(
