@@ -391,7 +391,7 @@ export default function App() {
               start: parsed.start,
               end: parsed.end,
               all_day: parsed.all_day,
-              location: parsed.location ?? null,
+              location: parsed.location ?? undefined,
               etag: null,
               description: null,
             });
