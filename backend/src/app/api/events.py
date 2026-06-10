@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -48,6 +48,77 @@ class EventDelete(BaseModel):
     etag: str
 
 
+# ── RRULE-Expansion ───────────────────────────────────────────────────────────
+
+def expand_rrule_event(event: Event, from_: datetime, to: datetime) -> list[dict]:
+    """
+    Expandiert ein RRULE-Event und gibt alle Instanzen zurück,
+    deren start ins Fenster [from_, to] fällt.
+    Gibt eine leere Liste zurück wenn etwas schiefgeht.
+    """
+    try:
+        from dateutil.rrule import rrulestr
+        from dateutil.relativedelta import relativedelta
+
+        master_start: datetime = event.start
+        master_end: datetime = event.end
+        duration: timedelta = master_end - master_start
+
+        # rrulestr braucht DTSTART damit die Basiszeit stimmt
+        rrule_str = event.rrule
+        if "DTSTART" not in rrule_str:
+            dtstart_str = master_start.strftime("DTSTART:%Y%m%dT%H%M%S\n")
+            rrule_str = dtstart_str + rrule_str
+
+        rule = rrulestr(rrule_str, ignoretz=True)
+
+        # Instanzen im Fenster berechnen – etwas Puffer damit ganztägige Events nicht rausfallen
+        instances = rule.between(
+            from_ - timedelta(days=1),
+            to + timedelta(days=1),
+            inc=True,
+        )
+
+        result = []
+        for inst in instances:
+            inst_start: datetime = inst
+            inst_end: datetime = inst + duration
+
+            # Nur Instanzen die tatsächlich ins Fenster fallen
+            if inst_start >= to or inst_end <= from_:
+                continue
+
+            result.append({
+                "uid": event.uid,
+                "calendar_id": event.calendar_id,
+                "summary": event.summary,
+                "start": inst_start,
+                "end": inst_end,
+                "all_day": event.all_day,
+                "location": event.location,
+                "etag": event.etag,
+                "description": event.description,
+            })
+
+        return result
+
+    except Exception:
+        # Im Fehlerfall: Master-Event direkt zurückgeben falls er ins Fenster passt
+        if event.start < to and event.end > from_:
+            return [{
+                "uid": event.uid,
+                "calendar_id": event.calendar_id,
+                "summary": event.summary,
+                "start": event.start,
+                "end": event.end,
+                "all_day": event.all_day,
+                "location": event.location,
+                "etag": event.etag,
+                "description": event.description,
+            }]
+        return []
+
+
 # ── GET ───────────────────────────────────────────────────────────────────────
 
 @router.get("/events")
@@ -58,11 +129,27 @@ def get_events(
     db: Session = Depends(get_db),
     _: None = Depends(require_token),
 ):
-    q = db.query(Event).filter(Event.start < to, Event.end > from_)
+    # Alle Events die potenziell relevant sind:
+    # - Nicht-RRULE: start muss im Fenster liegen
+    # - RRULE: start kann weit in der Vergangenheit liegen → alle Events mit rrule holen
+    q = db.query(Event)
     if calendar_id:
         q = q.filter(Event.calendar_id == calendar_id)
-    return [
-        {
+
+    # Nicht-RRULE Events: normaler Fenster-Filter
+    non_rrule = (
+        q.filter(Event.rrule.is_(None), Event.start < to, Event.end > from_)
+        .all()
+    )
+
+    # RRULE Events: alle holen, Expansion filtert
+    rrule_events = q.filter(Event.rrule.isnot(None)).all()
+
+    result = []
+
+    # Nicht-RRULE direkt serialisieren
+    for e in non_rrule:
+        result.append({
             "uid": e.uid,
             "calendar_id": e.calendar_id,
             "summary": e.summary,
@@ -71,9 +158,14 @@ def get_events(
             "all_day": e.all_day,
             "location": e.location,
             "etag": e.etag,
-        }
-        for e in q.all()
-    ]
+            "description": e.description,
+        })
+
+    # RRULE-Events expandieren
+    for e in rrule_events:
+        result.extend(expand_rrule_event(e, from_, to))
+
+    return result
 
 
 # ── POST: Erstellen ───────────────────────────────────────────────────────────
@@ -100,7 +192,6 @@ def post_event(
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
-    # Sync läuft im Hintergrund — Response geht sofort raus
     background.add_task(run_sync)
     return {"uid": uid}
 
