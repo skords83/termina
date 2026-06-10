@@ -61,7 +61,7 @@ def expand_rrule_event(event: Event, from_: datetime, to: datetime) -> list[dict
         from dateutil.relativedelta import relativedelta
 
         master_start: datetime = event.start
-        master_end: datetime = event.end
+        master_end: datetime = event.end if event.end is not None else master_start + timedelta(hours=1)
         duration: timedelta = master_end - master_start
 
         # rrulestr braucht DTSTART damit die Basiszeit stimmt
@@ -104,7 +104,7 @@ def expand_rrule_event(event: Event, from_: datetime, to: datetime) -> list[dict
 
     except Exception:
         # Im Fehlerfall: Master-Event direkt zurückgeben falls er ins Fenster passt
-        if event.start < to and event.end > from_:
+        if event.start is not None and event.start < to and (event.end is None or event.end > from_):
             return [{
                 "uid": event.uid,
                 "calendar_id": event.calendar_id,
