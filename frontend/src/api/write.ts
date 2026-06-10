@@ -61,10 +61,12 @@ export async function deleteEvent(
   uid: string,
   payload: DeleteEventPayload
 ): Promise<void> {
-  const res = await fetch(`/api/events/${encodeURIComponent(uid)}`, {
-    method: 'DELETE',
-    headers: headers(),
-    body: JSON.stringify(payload),
-  });
+  const res = await fetch(
+    `/api/events/${encodeURIComponent(uid)}?etag=${encodeURIComponent(payload.etag)}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${getToken()}` },
+    }
+  );
   if (!res.ok) throw mapError(res.status);
 }

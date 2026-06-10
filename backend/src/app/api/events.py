@@ -44,10 +44,6 @@ class EventUpdate(BaseModel):
     description: str | None = None
 
 
-class EventDelete(BaseModel):
-    etag: str
-
-
 # ── RRULE-Expansion ───────────────────────────────────────────────────────────
 
 def expand_rrule_event(event: Event, from_: datetime, to: datetime) -> list[dict]:
@@ -238,8 +234,8 @@ def put_event(
 @router.delete("/events/{uid}", status_code=204)
 def delete_event_endpoint(
     uid: str,
-    body: EventDelete,
-    background: BackgroundTasks,
+    etag: str = Query(...),
+    background: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db),
     _: None = Depends(require_token),
 ):
@@ -251,7 +247,7 @@ def delete_event_endpoint(
         delete_event(
             calendar_id=event.calendar_id,
             uid=uid,
-            etag=body.etag,
+            etag=etag,
         )
     except ConflictError:
         raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
