@@ -1,5 +1,6 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
+import zoneinfo
 
 from icalendar import Calendar as ICalendar
 from sqlalchemy.orm import Session
@@ -10,20 +11,36 @@ from app.db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 
+BERLIN = zoneinfo.ZoneInfo("Europe/Berlin")
+
 
 def _parse_dt(value) -> tuple[datetime | None, bool]:
-    """Return (datetime_utc, all_day). Handles date and datetime."""
-    from datetime import date
+    """Return (datetime_naive_local, all_day).
 
+    Speichert naive Datetimes in Europe/Berlin-Lokalzeit, damit das Frontend
+    sie ohne Umrechnung anzeigen kann.
+
+    Nextcloud liefert:
+      - DTSTART mit TZID=Europe/Berlin → aware datetime → nach Berlin konvertieren
+      - DTSTART als naive datetime     → bereits Lokalzeit, tzinfo nur entfernen
+      - DATE (ganztägig)               → date-Objekt → datetime um Mitternacht
+    """
     if value is None:
         return None, False
+
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            # Assume UTC for naive datetimes
-            value = value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc), False
+            # Naive datetime von Nextcloud → bereits Lokalzeit, unverändert speichern
+            return value.replace(tzinfo=None), False
+        else:
+            # Aware datetime (UTC oder beliebige TZID) → nach Europe/Berlin konvertieren
+            local = value.astimezone(BERLIN)
+            return local.replace(tzinfo=None), False
+
     if isinstance(value, date):
-        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc), True
+        # Ganztägiges Event
+        return datetime(value.year, value.month, value.day), True
+
     return None, False
 
 
