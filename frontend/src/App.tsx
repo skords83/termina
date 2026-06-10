@@ -13,7 +13,7 @@ import WeekView from './components/WeekView';
 import DayView from './components/DayView';
 import AgendaView from './components/AgendaView';
 import SearchModal from './components/SearchModal';
-import NaturalInputBar from './components/NaturalInputBar';
+import { NaturalInputBar } from './components/NaturalInputBar';
 import { createEvent } from './api/write';
 
 const MONTHS = [
@@ -388,7 +388,7 @@ export default function App() {
         <NaturalInputBar
           calendars={calendars}
           defaultCalendarId={calendars.find((c) => c.name === 'Persönlich')?.id}
-          onConfirm={async (parsed) => {
+          onConfirm={async (parsed: import('./utils/naturalParser').ParsedEvent & { calendar_id: string }) => {
             const { uid } = await createEvent({
               calendar_id: parsed.calendar_id,
               summary: parsed.summary,
