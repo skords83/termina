@@ -3,12 +3,18 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.auth import require_token
-from app.caldav.write import create_event, update_event, delete_event, ConflictError, CalDAVTimeoutError
+from app.caldav.write import (
+    create_event,
+    update_event,
+    delete_event,
+    ConflictError,
+    CalDAVTimeoutError,
+)
 from app.caldav.sync import run_sync
 from app.db.models import Event
 from app.db.session import get_db
@@ -75,6 +81,7 @@ def get_events(
 @router.post("/events", status_code=201)
 def post_event(
     body: EventCreate,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     _: None = Depends(require_token),
 ):
@@ -93,13 +100,8 @@ def post_event(
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
-    # Sofort re-synchen damit das neue Event in der DB landet
-    run_sync()
-
-    event = db.query(Event).filter(Event.uid == uid).first()
-    if not event:
-        raise HTTPException(status_code=500, detail="Sync nach Create fehlgeschlagen")
-
+    # Sync läuft im Hintergrund — Response geht sofort raus
+    background.add_task(run_sync)
     return {"uid": uid}
 
 
@@ -109,6 +111,7 @@ def post_event(
 def put_event(
     uid: str,
     body: EventUpdate,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     _: None = Depends(require_token),
 ):
@@ -135,7 +138,7 @@ def put_event(
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
-    run_sync()
+    background.add_task(run_sync)
     return {"uid": uid}
 
 
@@ -145,6 +148,7 @@ def put_event(
 def delete_event_endpoint(
     uid: str,
     body: EventDelete,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     _: None = Depends(require_token),
 ):
@@ -165,4 +169,4 @@ def delete_event_endpoint(
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
-    run_sync()
+    background.add_task(run_sync)
