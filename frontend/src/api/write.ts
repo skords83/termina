@@ -10,8 +10,16 @@ import type {
   WriteError,
 } from '../types';
 
-const getToken = (): string =>
-  localStorage.getItem('termina_token') ?? '';
+const getToken = (): string => {
+  try {
+    const raw = localStorage.getItem('termina-storage');
+    if (!raw) return '';
+    const parsed = JSON.parse(raw);
+    return parsed?.state?.token ?? '';
+  } catch {
+    return '';
+  }
+};
 
 const headers = () => ({
   'Content-Type': 'application/json',
