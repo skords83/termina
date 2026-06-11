@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import uuid
+import zoneinfo
 from datetime import datetime, timezone, timedelta, date as date_cls
 from typing import Literal
 
@@ -8,6 +10,10 @@ from icalendar import Calendar, Event as ICalEvent
 from caldav import DAVClient
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+BERLIN = zoneinfo.ZoneInfo("Europe/Berlin")
 
 
 class ConflictError(Exception):
@@ -75,11 +81,9 @@ def _find_overrides(cal: Calendar) -> list[ICalEvent]:
 
 
 def _dt_equal(a, b) -> bool:
-    """Vergleicht zwei datetime/date robust (ignoriert tz wenn nötig)."""
     if a is None or b is None:
         return a is b
 
-    # Beide auf naive datetime normalisieren
     def _norm(x):
         if isinstance(x, datetime):
             return x.replace(tzinfo=None)
@@ -88,6 +92,26 @@ def _dt_equal(a, b) -> bool:
         return x
 
     return _norm(a) == _norm(b)
+
+
+def _master_dtstart_is_aware(master: ICalEvent) -> bool:
+    """True wenn der Master-DTSTART tz-aware ist (also mit TZID gespeichert)."""
+    dtstart = master.get("DTSTART")
+    if dtstart is None:
+        return False
+    val = dtstart.dt
+    return isinstance(val, datetime) and val.tzinfo is not None
+
+
+def _strip_rrule_keys(rrule, keys_to_remove: set[str]) -> dict:
+    """vRecur → dict, ohne bestimmte Keys (case-insensitive)."""
+    upper = {k.upper() for k in keys_to_remove}
+    result: dict = {}
+    for k, v in rrule.items():
+        if k.upper() in upper:
+            continue
+        result[k] = v
+    return result
 
 
 def _make_ical(
@@ -124,7 +148,7 @@ def _make_ical(
     return cal.to_ical()
 
 
-# ── Create / Update / Delete (unverändert) ───────────────────────────────────
+# ── Create / Update / Delete ─────────────────────────────────────────────────
 
 def create_event(
     calendar_id: str,
@@ -135,7 +159,6 @@ def create_event(
     location: str | None = None,
     description: str | None = None,
 ) -> str:
-    """Erstellt ein neues Event auf CalDAV. Gibt die neue UID zurück."""
     uid = str(uuid.uuid4())
     ical_data = _make_ical(uid, summary, start, end, all_day, location, description)
 
@@ -166,7 +189,6 @@ def update_event(
     location: str | None = None,
     description: str | None = None,
 ) -> None:
-    """Aktualisiert ein Event. Wirft ConflictError wenn ETag nicht mehr stimmt."""
     try:
         client = _get_client()
         cal = _find_caldav_calendar(client, calendar_id)
@@ -191,7 +213,6 @@ def update_event(
 
 
 def delete_event(calendar_id: str, uid: str, etag: str) -> None:
-    """Löscht ein Event. Wirft ConflictError wenn ETag nicht mehr stimmt."""
     try:
         client = _get_client()
         cal = _find_caldav_calendar(client, calendar_id)
@@ -229,20 +250,7 @@ def move_event(
     all_day: bool = False,
     recurrence_id: datetime | None = None,
 ) -> dict:
-    """
-    Verschiebt ein Event.
-
-    Modi:
-    - 'all':    Master-DTSTART/DTEND um delta (new_start - original_start) verschieben.
-                Ändert die gesamte Serie (oder ein nicht-rekurrentes Event).
-                Existierende RECURRENCE-ID-Overrides werden mit verschoben.
-    - 'single': Fügt einen RECURRENCE-ID-Override hinzu (nur diese eine Instanz).
-                recurrence_id = ursprüngliches Datum dieser Instanz.
-    - 'future': Setzt UNTIL im Master-RRULE und erstellt ein neues Event mit
-                neuer UID ab new_start. Gibt {'new_uid': ...} zurück.
-
-    Returns: dict mit ggf. 'new_uid' bei mode='future'.
-    """
+    """Verschiebt ein Event. Returns dict, ggf. mit 'new_uid' bei mode='future'."""
     try:
         client = _get_client()
         cal = _find_caldav_calendar(client, calendar_id)
@@ -292,6 +300,7 @@ def move_event(
     except (ValueError, ConflictError):
         raise
     except Exception as e:
+        logger.exception("move_event(%s) failed", mode)
         if "timeout" in str(e).lower() or "ReadTimeout" in type(e).__name__:
             raise CalDAVTimeoutError(f"Nextcloud nicht erreichbar: {e}") from e
         raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
@@ -304,19 +313,14 @@ def _apply_move_all(
     new_start: datetime,
     all_day: bool,
 ) -> None:
-    """Verschiebt Master + alle Overrides um delta."""
-    # Delta naiv berechnen (ohne tz-Konvertierung)
     o = original_start.replace(tzinfo=None) if original_start.tzinfo else original_start
     n = new_start.replace(tzinfo=None) if new_start.tzinfo else new_start
     delta = n - o
 
-    # Master shiften
     _shift_component(master, delta, all_day)
 
-    # Alle Overrides ebenfalls shiften (relativ zum Master)
     for override in _find_overrides(ical):
         _shift_component(override, delta, all_day)
-        # RECURRENCE-ID ebenfalls shiften, damit der Override zur neuen Instanz passt
         rid = override.get("RECURRENCE-ID")
         if rid is not None:
             old = rid.dt
@@ -329,7 +333,6 @@ def _apply_move_all(
 
 
 def _shift_component(comp: ICalEvent, delta: timedelta, all_day: bool) -> None:
-    """Verschiebt DTSTART und DTEND einer Komponente um delta."""
     dtstart = comp.get("DTSTART")
     dtend = comp.get("DTEND")
 
@@ -359,8 +362,6 @@ def _apply_move_single(
     new_end: datetime,
     all_day: bool,
 ) -> None:
-    """Fügt einen RECURRENCE-ID-Override hinzu. Ersetzt existierenden Override für dasselbe Datum."""
-    # Existierenden Override für dasselbe recurrence_id entfernen
     to_remove = []
     for sub in ical.subcomponents:
         if getattr(sub, "name", None) != "VEVENT":
@@ -373,11 +374,9 @@ def _apply_move_single(
     for sub in to_remove:
         ical.subcomponents.remove(sub)
 
-    # Neuen Override anlegen
     override = ICalEvent()
     override.add("UID", uid)
 
-    # Felder vom Master übernehmen
     if "SUMMARY" in master:
         override.add("SUMMARY", master["SUMMARY"])
     if "LOCATION" in master:
@@ -388,7 +387,6 @@ def _apply_move_single(
     override.add("DTSTAMP", datetime.now(timezone.utc))
 
     if all_day:
-        # RECURRENCE-ID als date für all-day
         rid_val = recurrence_id.date() if isinstance(recurrence_id, datetime) else recurrence_id
         override.add("RECURRENCE-ID", rid_val)
         override.add("DTSTART", new_start.date() if isinstance(new_start, datetime) else new_start)
@@ -411,33 +409,51 @@ def _apply_move_future(
     all_day: bool,
 ) -> str:
     """
-    Setzt UNTIL im Master-RRULE auf (recurrence_id - 1 Sekunde / 1 Tag),
-    erstellt neues Event mit eigener UID ab new_start.
-    Gibt die neue UID zurück.
+    Setzt UNTIL im Master-RRULE (= alte Serie endet vor recurrence_id),
+    erstellt neues Event mit eigener UID ab new_start mit gleicher RRULE.
+
+    WICHTIG: UNTIL muss zur Form des Master-DTSTART passen, sonst rechnet
+    der CalDAV-Server (oder dateutil bei der Expansion) im falschen TZ.
     """
     rrule = master.get("RRULE")
     if rrule is None:
         raise ValueError("Master hat keine RRULE — 'future' nicht möglich")
 
-    # UNTIL setzen
-    if all_day:
-        until_val = (recurrence_id.date() if isinstance(recurrence_id, datetime) else recurrence_id) - timedelta(days=1)
-    else:
-        until = recurrence_id - timedelta(seconds=1)
-        if until.tzinfo is None:
-            until = until.replace(tzinfo=timezone.utc)
-        else:
-            until = until.astimezone(timezone.utc)
-        until_val = until
+    master_aware = _master_dtstart_is_aware(master)
+    logger.info(
+        "move_event[future] master DTSTART tz-aware=%s, recurrence_id=%s, all_day=%s",
+        master_aware, recurrence_id, all_day,
+    )
 
-    # RRULE neu setzen (alte ersetzen, da vRecur sich nicht zuverlässig in-place mutieren lässt)
-    new_rrule_dict = dict(rrule)
-    new_rrule_dict.pop("COUNT", None)  # COUNT und UNTIL sind exklusiv
+    # UNTIL passend zur Master-Form berechnen
+    if all_day:
+        rid_date = recurrence_id.date() if isinstance(recurrence_id, datetime) else recurrence_id
+        until_val = rid_date - timedelta(days=1)
+    else:
+        # recurrence_id kommt vom Frontend als naive Berlin-Lokalzeit
+        rid_dt = recurrence_id if isinstance(recurrence_id, datetime) else datetime(
+            recurrence_id.year, recurrence_id.month, recurrence_id.day
+        )
+        rid_naive = rid_dt.replace(tzinfo=None) if rid_dt.tzinfo else rid_dt
+        until_naive_local = rid_naive - timedelta(seconds=1)
+
+        if master_aware:
+            # Master hat TZID → UNTIL muss in UTC sein (RFC 5545)
+            until_val = until_naive_local.replace(tzinfo=BERLIN).astimezone(timezone.utc)
+        else:
+            # Master ist floating → UNTIL bleibt naive
+            until_val = until_naive_local
+
+    logger.info("move_event[future] setting UNTIL=%s (master_aware=%s)", until_val, master_aware)
+
+    # RRULE rebuild: UNTIL/COUNT raus, neues UNTIL rein
+    new_rrule_dict = _strip_rrule_keys(rrule, {"UNTIL", "COUNT"})
     new_rrule_dict["UNTIL"] = [until_val]
+
     master.pop("RRULE", None)
     master.add("RRULE", new_rrule_dict)
 
-    # Etwaige Overrides nach recurrence_id verwerfen — die gehören zum neuen Event
+    # Overrides nach recurrence_id verwerfen (gehören zur neuen Serie)
     to_remove = []
     for sub in ical.subcomponents:
         if getattr(sub, "name", None) != "VEVENT":
@@ -447,13 +463,15 @@ def _apply_move_future(
             continue
         old = rid.dt
         old_dt = old if isinstance(old, datetime) else datetime(old.year, old.month, old.day)
-        rid_dt = recurrence_id if isinstance(recurrence_id, datetime) else datetime(recurrence_id.year, recurrence_id.month, recurrence_id.day)
-        if old_dt.replace(tzinfo=None) >= rid_dt.replace(tzinfo=None):
+        rid_dt_norm = recurrence_id if isinstance(recurrence_id, datetime) else datetime(
+            recurrence_id.year, recurrence_id.month, recurrence_id.day
+        )
+        if old_dt.replace(tzinfo=None) >= rid_dt_norm.replace(tzinfo=None):
             to_remove.append(sub)
     for sub in to_remove:
         ical.subcomponents.remove(sub)
 
-    # Neues Event mit eigener UID, RRULE ohne UNTIL
+    # Neues Event mit eigener UID, frische RRULE ohne UNTIL/COUNT
     new_uid = str(uuid.uuid4())
     new_cal = Calendar()
     new_cal.add("prodid", "-//Termina//termina//EN")
@@ -473,16 +491,17 @@ def _apply_move_future(
         new_ev.add("dtstart", new_start.date() if isinstance(new_start, datetime) else new_start)
         new_ev.add("dtend", new_end.date() if isinstance(new_end, datetime) else new_end)
     else:
-        new_ev.add("dtstart", new_start)
-        new_ev.add("dtend", new_end)
+        ns = new_start.replace(tzinfo=None) if new_start.tzinfo else new_start
+        ne = new_end.replace(tzinfo=None) if new_end.tzinfo else new_end
+        new_ev.add("dtstart", ns)
+        new_ev.add("dtend", ne)
 
-    # RRULE für neue Serie: ursprüngliche Regel ohne UNTIL/COUNT
-    fresh_rrule = dict(rrule)
-    fresh_rrule.pop("UNTIL", None)
-    fresh_rrule.pop("COUNT", None)
+    fresh_rrule = _strip_rrule_keys(rrule, {"UNTIL", "COUNT"})
     new_ev.add("rrule", fresh_rrule)
 
     new_cal.add_component(new_ev)
     caldav_cal.save_event(new_cal.to_ical())
+
+    logger.info("move_event[future] created new event uid=%s", new_uid)
 
     return new_uid

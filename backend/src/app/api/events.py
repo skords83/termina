@@ -62,10 +62,6 @@ def expand_rrule_event(
     to: datetime,
     overrides: dict[str, EventOverride] | None = None,
 ) -> list[dict]:
-    """Expandiert ein RRULE-Event und wendet Overrides an.
-
-    overrides: dict mapping recurrence_id.isoformat() → EventOverride.
-    """
     overrides = overrides or {}
 
     try:
@@ -93,7 +89,6 @@ def expand_rrule_event(
             override = overrides.get(inst_key)
 
             if override is not None:
-                # Verschobene Instanz — Override-Daten verwenden
                 ov_start = override.start
                 ov_end = override.end if override.end is not None else (
                     ov_start + duration if ov_start is not None else None
@@ -114,12 +109,9 @@ def expand_rrule_event(
                     "etag": event.etag,
                     "description": override.description if override.description is not None else event.description,
                     "is_recurring": True,
-                    # recurrence_id bleibt der ursprüngliche Instanz-Zeitpunkt,
-                    # damit weitere Move-Operationen funktionieren
                     "recurrence_id": inst,
                 })
             else:
-                # Normale Expansion
                 inst_start: datetime = inst
                 inst_end: datetime = inst + duration
                 if inst_start >= to or inst_end <= from_:
@@ -159,6 +151,21 @@ def expand_rrule_event(
         return []
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _strip_rrule_str(rrule_str: str, keys_to_remove: set[str]) -> str:
+    """Entfernt bestimmte Keys (z.B. UNTIL, COUNT) aus einem RRULE-String."""
+    upper = {k.upper() for k in keys_to_remove}
+    parts = []
+    for p in rrule_str.split(";"):
+        if "=" in p:
+            key = p.split("=", 1)[0].upper()
+            if key in upper:
+                continue
+        parts.append(p)
+    return ";".join(parts)
+
+
 # ── GET ───────────────────────────────────────────────────────────────────────
 
 @router.get("/events")
@@ -196,7 +203,6 @@ def get_events(
             "recurrence_id": None,
         })
 
-    # Overrides für rekurrente Events laden (gebündelt, eine Query)
     overrides_by_uid: dict[str, dict[str, EventOverride]] = {}
     if rrule_events:
         uids = [e.uid for e in rrule_events]
@@ -326,15 +332,13 @@ def post_move(
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
-    # Lokale DB sofort aktualisieren für instant UI feedback
+    # Lokale DB sofort aktualisieren — damit Frontend-Refetch (~1.5s) den neuen Stand sieht
     if body.mode == "all":
         delta = body.new_start.replace(tzinfo=None) - body.original_start.replace(tzinfo=None)
         if event.start is not None:
             event.start = event.start + delta
         if event.end is not None:
             event.end = event.end + delta
-        # Auch die recurrence_ids existierender Overrides um delta shiften,
-        # damit sie zu den neuen Instanzen passen
         for ov in db.query(EventOverride).filter(EventOverride.master_uid == uid).all():
             if ov.recurrence_id is not None:
                 ov.recurrence_id = ov.recurrence_id + delta
@@ -345,8 +349,6 @@ def post_move(
         db.commit()
 
     elif body.mode == "single":
-        # Override sofort in die DB schreiben, damit der nächste GET ihn sieht
-        # (CalDAV-Sync würde das auch tun, aber erst nach ~5s)
         rid_naive = body.recurrence_id.replace(tzinfo=None) if body.recurrence_id else None
         if rid_naive is not None:
             existing_ov = (
@@ -371,7 +373,46 @@ def post_move(
                 ))
             db.commit()
 
-    # mode='future' überlassen wir dem nächsten Sync (komplexer Fall mit neuer UID)
+    elif body.mode == "future":
+        rid_naive = body.recurrence_id.replace(tzinfo=None) if body.recurrence_id else None
+        new_start_naive = body.new_start.replace(tzinfo=None)
+        new_end_naive = body.new_end.replace(tzinfo=None)
+
+        if rid_naive is not None and event.rrule:
+            # 1. Master-RRULE in DB: UNTIL setzen (= recurrence_id - 1 Sekunde, naive)
+            until_dt = rid_naive - timedelta(seconds=1)
+            until_str = until_dt.strftime("%Y%m%dT%H%M%S")
+            new_master_rrule = _strip_rrule_str(event.rrule, {"UNTIL", "COUNT"})
+            event.rrule = f"{new_master_rrule};UNTIL={until_str}" if new_master_rrule else f"UNTIL={until_str}"
+
+            # 2. Overrides ab recurrence_id löschen (gehören zur neuen Serie)
+            db.query(EventOverride).filter(
+                EventOverride.master_uid == uid,
+                EventOverride.recurrence_id >= rid_naive,
+            ).delete(synchronize_session=False)
+
+        # 3. Neues Event mit neuer UID anlegen (mit frischer RRULE ohne UNTIL/COUNT)
+        if "new_uid" in result and result["new_uid"]:
+            fresh_rrule = _strip_rrule_str(event.rrule, {"UNTIL", "COUNT"}) if event.rrule else None
+            # Stripping ohne UNTIL/COUNT auf event.rrule angewendet — aber event.rrule hat schon UNTIL!
+            # Daher: vom ORIGINAL-RRULE-String ausgehen. Den haben wir nicht mehr direkt,
+            # aber wir können vom gerade konstruierten new_master_rrule ausgehen
+            # (das war der Original-String ohne UNTIL/COUNT).
+            db.add(Event(
+                uid=result["new_uid"],
+                calendar_id=event.calendar_id,
+                etag=None,  # wird beim nächsten Sync gesetzt
+                summary=event.summary,
+                start=new_start_naive,
+                end=new_end_naive,
+                all_day=event.all_day,
+                rrule=new_master_rrule if (rid_naive is not None and event.rrule) else fresh_rrule,
+                location=event.location,
+                description=event.description,
+                raw_ical=None,
+            ))
+
+        db.commit()
 
     background.add_task(run_sync)
 
@@ -408,7 +449,6 @@ def delete_event_endpoint(
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
-    # Overrides explizit löschen (SQLite-FK-Cascade nicht garantiert aktiv)
     db.query(EventOverride).filter(EventOverride.master_uid == uid).delete(synchronize_session=False)
     db.delete(event)
     db.commit()
