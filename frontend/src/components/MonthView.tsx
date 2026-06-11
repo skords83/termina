@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CalendarEvent, Calendar } from '../types';
 
 interface Props {
@@ -15,20 +16,15 @@ interface Props {
 const WEEKDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 
 function localDateStr(date: Date): string {
-  // timezone-safe: uses local year/month/day, never UTC
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function parseLocalDate(iso: string): Date {
-  // Parse as local time to avoid UTC-shift at timezone boundaries (MESZ = UTC+2).
-  // Backend returns naive datetimes like "2026-06-08T00:00:00" without tz suffix.
   const datePart = iso.slice(0, 10);
   const [y, m, d] = datePart.split('-').map(Number);
   if (iso.length === 10) return new Date(y, m - 1, d);
-  // Has time component
   const hasTimezone = iso.includes('+') || iso.endsWith('Z');
-  if (hasTimezone) return new Date(iso); // browser handles tz-aware strings correctly
-  // Naive datetime (no tz) → parse as local
+  if (hasTimezone) return new Date(iso);
   const timePart = iso.slice(11, 19);
   const [h, min, s] = timePart.split(':').map(Number);
   return new Date(y, m - 1, d, h, min, s ?? 0);
@@ -39,7 +35,6 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
 }
 
-// Add days to a local date without timezone drift
 function addDays(date: Date, n: number): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + n);
 }
@@ -51,7 +46,125 @@ interface DayEvent {
   isMultiDay: boolean;
 }
 
-export function MonthView({ year, month, events, calendars, visibleCalendarIds, onEventClick, onDayClick, onMoreClick }: Props) {
+// ── Draggable Event ─────────────────────────────────────────────────────────
+
+function DraggableEvent({
+  ev,
+  dayKey,
+  isStart,
+  isEnd,
+  isMultiDay,
+  color,
+  onClick,
+}: {
+  ev: CalendarEvent;
+  dayKey: string;
+  isStart: boolean;
+  isEnd: boolean;
+  isMultiDay: boolean;
+  color: string;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  const { setNodeRef, listeners, attributes, isDragging } = useDraggable({
+    id: `month-event-${ev.uid}-${dayKey}`,
+    data: { event: ev, sourceDayKey: dayKey, source: 'month' },
+  });
+
+  const isBlock = ev.all_day || isMultiDay;
+
+  return (
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      className={[
+        'event-item',
+        isBlock ? 'event-item--block' : '',
+        isBlock && !isStart ? 'event-item--cont' : '',
+        isBlock && !isEnd ? 'event-item--continues' : '',
+        isDragging ? 'event-item--dragging' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      style={{ '--event-color': color, cursor: 'grab' } as React.CSSProperties}
+      title={ev.location ? `${ev.summary}\n${ev.location}` : ev.summary}
+      onClick={onClick}
+    >
+      {!isBlock && (
+        <span className="event-time">{formatTime(ev.start)}</span>
+      )}
+      <span className="event-title">
+        {isStart || !isMultiDay ? ev.summary : ''}
+      </span>
+    </div>
+  );
+}
+
+// ── Droppable Day Cell ──────────────────────────────────────────────────────
+
+function DroppableDayCell({
+  dateStr,
+  current,
+  isToday,
+  dayNum,
+  children,
+  onDayClick,
+}: {
+  dateStr: string;
+  current: boolean;
+  isToday: boolean;
+  dayNum: number;
+  children: React.ReactNode;
+  onDayClick: (dateStr: string) => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `month-day-${dateStr}`,
+    data: { dateStr, target: 'month' },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={[
+        'day-cell',
+        current ? '' : 'day-cell--other',
+        isToday ? 'day-cell--today' : '',
+        isOver ? 'day-cell--drop-over' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      onClick={() => onDayClick(dateStr)}
+    >
+      <div className="day-cell-header">
+        <span className="day-number">{dayNum}</span>
+        <button
+          className="day-add-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDayClick(dateStr);
+          }}
+          title="Termin erstellen"
+        >
+          +
+        </button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ── Hauptkomponente ─────────────────────────────────────────────────────────
+
+export function MonthView({
+  year,
+  month,
+  events,
+  calendars,
+  visibleCalendarIds,
+  onEventClick,
+  onDayClick,
+  onMoreClick,
+}: Props) {
   const today = new Date();
 
   const calendarMap = useMemo(
@@ -59,10 +172,9 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds, 
     [calendars]
   );
 
-  // Build grid cells
   const cells = useMemo(() => {
     const firstDay = new Date(year, month, 1);
-    const startOffset = (firstDay.getDay() + 6) % 7; // Mon=0
+    const startOffset = (firstDay.getDay() + 6) % 7;
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const daysInPrev = new Date(year, month, 0).getDate();
 
@@ -82,7 +194,6 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds, 
     return result;
   }, [year, month]);
 
-  // Group events by date – multi-day events appear on every day they span
   const eventsByDate = useMemo(() => {
     const map = new Map<string, DayEvent[]>();
 
@@ -90,11 +201,8 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds, 
       if (!visibleCalendarIds.has(ev.calendar_id)) continue;
 
       const startDate = parseLocalDate(ev.start);
-      // For all-day events, end is exclusive in iCal (e.g. end = next day for a 1-day event)
-      // For timed events, end is the actual end time
       let endDate = parseLocalDate(ev.end);
 
-      // Normalize: for all-day events, end is exclusive → subtract 1 day for display
       if (ev.all_day) {
         endDate = addDays(endDate, -1);
       }
@@ -103,7 +211,6 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds, 
       const endStr = localDateStr(endDate);
       const isMultiDay = startStr !== endStr;
 
-      // Walk every day this event spans
       let cursor = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
       while (localDateStr(cursor) <= endStr) {
         const key = localDateStr(cursor);
@@ -118,7 +225,6 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds, 
       }
     }
 
-    // Sort: all-day/multi-day first, then by start time
     for (const [, dayEvs] of map) {
       dayEvs.sort((a, b) => {
         const aAllDay = a.ev.all_day || a.isMultiDay ? 0 : 1;
@@ -139,7 +245,9 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds, 
     <div className="month-view">
       <div className="month-header">
         {WEEKDAYS.map((d) => (
-          <div key={d} className="month-weekday">{d}</div>
+          <div key={d} className="month-weekday">
+            {d}
+          </div>
         ))}
       </div>
 
@@ -149,66 +257,44 @@ export function MonthView({ year, month, events, calendars, visibleCalendarIds, 
           const dayEvents = eventsByDate.get(key) ?? [];
 
           return (
-            <div
+            <DroppableDayCell
               key={i}
-              className={[
-                'day-cell',
-                current ? '' : 'day-cell--other',
-                isToday(date) ? 'day-cell--today' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              onClick={() => onDayClick(key)}
+              dateStr={key}
+              current={current}
+              isToday={isToday(date)}
+              dayNum={date.getDate()}
+              onDayClick={onDayClick}
             >
-              <div className="day-cell-header">
-                <span className="day-number">{date.getDate()}</span>
-                <button
-                  className="day-add-btn"
-                  onClick={(e) => { e.stopPropagation(); onDayClick(key); }}
-                  title="Termin erstellen"
-                >+</button>
-              </div>
               <div className="event-list">
                 {dayEvents.slice(0, 6).map(({ ev, isStart, isEnd, isMultiDay }) => {
                   const cal = calendarMap.get(ev.calendar_id);
                   const color = cal?.color ?? '#888';
-                  const isBlock = ev.all_day || isMultiDay;
-
                   return (
-                    <div
+                    <DraggableEvent
                       key={ev.uid + key}
-                      className={[
-                        'event-item',
-                        isBlock ? 'event-item--block' : '',
-                        isBlock && !isStart ? 'event-item--cont' : '',
-                        isBlock && !isEnd ? 'event-item--continues' : '',
-                      ]
-                        .filter(Boolean)
-                        .join(' ')}
-                      style={{ '--event-color': color, cursor: 'pointer' } as React.CSSProperties}
-                      title={ev.location ? `${ev.summary}\n${ev.location}` : ev.summary}
+                      ev={ev}
+                      dayKey={key}
+                      isStart={isStart}
+                      isEnd={isEnd}
+                      isMultiDay={isMultiDay}
+                      color={color}
                       onClick={(e) => onEventClick(ev, e)}
-                    >
-                      {!isBlock && (
-                        <span className="event-time">{formatTime(ev.start)}</span>
-                      )}
-                      <span className="event-title">
-                        {/* Only show title on start day for multi-day, saves space */}
-                        {isStart || !isMultiDay ? ev.summary : ''}
-                      </span>
-                    </div>
+                    />
                   );
                 })}
                 {dayEvents.length > 6 && (
                   <div
                     className="event-more event-more--clickable"
-                    onClick={(e) => { e.stopPropagation(); onMoreClick?.(key); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMoreClick?.(key);
+                    }}
                   >
                     +{dayEvents.length - 6} weitere
                   </div>
                 )}
               </div>
-            </div>
+            </DroppableDayCell>
           );
         })}
       </div>

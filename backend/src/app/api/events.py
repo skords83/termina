@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, date, timedelta
-from typing import Optional
+from datetime import datetime, timedelta
+from typing import Optional, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -12,6 +12,7 @@ from app.caldav.write import (
     create_event,
     update_event,
     delete_event,
+    move_event,
     ConflictError,
     CalDAVTimeoutError,
 )
@@ -44,31 +45,32 @@ class EventUpdate(BaseModel):
     description: str | None = None
 
 
+class EventMove(BaseModel):
+    mode: Literal["single", "future", "all"]
+    etag: str
+    original_start: datetime
+    new_start: datetime
+    new_end: datetime
+    recurrence_id: datetime | None = None
+
+
 # ── RRULE-Expansion ───────────────────────────────────────────────────────────
 
 def expand_rrule_event(event: Event, from_: datetime, to: datetime) -> list[dict]:
-    """
-    Expandiert ein RRULE-Event und gibt alle Instanzen zurück,
-    deren start ins Fenster [from_, to] fällt.
-    Gibt eine leere Liste zurück wenn etwas schiefgeht.
-    """
+    """Expandiert ein RRULE-Event und gibt alle Instanzen im Fenster zurück."""
     try:
         from dateutil.rrule import rrulestr
-        from dateutil.relativedelta import relativedelta
 
         master_start: datetime = event.start
         master_end: datetime = event.end if event.end is not None else master_start + timedelta(hours=1)
         duration: timedelta = master_end - master_start
 
-        # rrulestr braucht DTSTART damit die Basiszeit stimmt
         rrule_str = event.rrule
         if "DTSTART" not in rrule_str:
             dtstart_str = master_start.strftime("DTSTART:%Y%m%dT%H%M%S\n")
             rrule_str = dtstart_str + rrule_str
 
         rule = rrulestr(rrule_str, ignoretz=True)
-
-        # Instanzen im Fenster berechnen – etwas Puffer damit ganztägige Events nicht rausfallen
         instances = rule.between(
             from_ - timedelta(days=1),
             to + timedelta(days=1),
@@ -79,8 +81,6 @@ def expand_rrule_event(event: Event, from_: datetime, to: datetime) -> list[dict
         for inst in instances:
             inst_start: datetime = inst
             inst_end: datetime = inst + duration
-
-            # Nur Instanzen die tatsächlich ins Fenster fallen
             if inst_start >= to or inst_end <= from_:
                 continue
 
@@ -94,12 +94,13 @@ def expand_rrule_event(event: Event, from_: datetime, to: datetime) -> list[dict
                 "location": event.location,
                 "etag": event.etag,
                 "description": event.description,
+                "is_recurring": True,
+                "recurrence_id": inst_start,
             })
 
         return result
 
     except Exception:
-        # Im Fehlerfall: Master-Event direkt zurückgeben falls er ins Fenster passt
         if event.start is not None and event.start < to and (event.end is None or event.end > from_):
             return [{
                 "uid": event.uid,
@@ -111,6 +112,8 @@ def expand_rrule_event(event: Event, from_: datetime, to: datetime) -> list[dict
                 "location": event.location,
                 "etag": event.etag,
                 "description": event.description,
+                "is_recurring": True,
+                "recurrence_id": event.start,
             }]
         return []
 
@@ -125,25 +128,18 @@ def get_events(
     db: Session = Depends(get_db),
     _: None = Depends(require_token),
 ):
-    # Alle Events die potenziell relevant sind:
-    # - Nicht-RRULE: start muss im Fenster liegen
-    # - RRULE: start kann weit in der Vergangenheit liegen → alle Events mit rrule holen
     q = db.query(Event)
     if calendar_id:
         q = q.filter(Event.calendar_id == calendar_id)
 
-    # Nicht-RRULE Events: normaler Fenster-Filter
     non_rrule = (
         q.filter(Event.rrule.is_(None), Event.start < to, Event.end > from_)
         .all()
     )
-
-    # RRULE Events: alle holen, Expansion filtert
     rrule_events = q.filter(Event.rrule.isnot(None)).all()
 
     result = []
 
-    # Nicht-RRULE direkt serialisieren
     for e in non_rrule:
         result.append({
             "uid": e.uid,
@@ -155,9 +151,10 @@ def get_events(
             "location": e.location,
             "etag": e.etag,
             "description": e.description,
+            "is_recurring": False,
+            "recurrence_id": None,
         })
 
-    # RRULE-Events expandieren
     for e in rrule_events:
         result.extend(expand_rrule_event(e, from_, to))
 
@@ -229,6 +226,70 @@ def put_event(
     return {"uid": uid}
 
 
+# ── POST /move: Verschieben (DnD) ─────────────────────────────────────────────
+
+@router.post("/events/{uid}/move")
+def post_move(
+    uid: str,
+    body: EventMove,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_token),
+):
+    event = db.query(Event).filter(Event.uid == uid).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event nicht gefunden")
+
+    # Validierung: single/future brauchen recurrence_id
+    if body.mode in ("single", "future") and body.recurrence_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"recurrence_id ist für mode='{body.mode}' erforderlich",
+        )
+
+    # Validierung: single/future nur bei rekurrenten Events sinnvoll
+    if body.mode in ("single", "future") and not event.rrule:
+        raise HTTPException(
+            status_code=400,
+            detail=f"mode='{body.mode}' nur für rekurrente Events erlaubt",
+        )
+
+    try:
+        result = move_event(
+            mode=body.mode,
+            calendar_id=event.calendar_id,
+            uid=uid,
+            etag=body.etag,
+            original_start=body.original_start,
+            new_start=body.new_start,
+            new_end=body.new_end,
+            all_day=event.all_day,
+            recurrence_id=body.recurrence_id,
+        )
+    except ConflictError:
+        raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except CalDAVTimeoutError as e:
+        raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
+
+    # Lokale DB sofort aktualisieren für instant UI feedback (sync räumt später nach)
+    if body.mode == "all":
+        delta = body.new_start.replace(tzinfo=None) - body.original_start.replace(tzinfo=None)
+        if event.start is not None:
+            event.start = event.start + delta
+        if event.end is not None:
+            event.end = event.end + delta
+        db.commit()
+
+    background.add_task(run_sync)
+
+    response = {"uid": uid}
+    if "new_uid" in result:
+        response["new_uid"] = result["new_uid"]
+    return response
+
+
 # ── DELETE: Löschen ───────────────────────────────────────────────────────────
 
 @router.delete("/events/{uid}", status_code=204)
@@ -256,7 +317,6 @@ def delete_event_endpoint(
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
-    # Lokal sofort entfernen, damit refetches das Event nicht wieder zeigen
     db.delete(event)
     db.commit()
 

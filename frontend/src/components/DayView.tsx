@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { CalendarEvent, Calendar } from "../types/index";
 
 interface DayViewProps {
@@ -12,6 +13,8 @@ interface DayViewProps {
 const HOUR_HEIGHT = 64;
 const TOTAL_HOURS = 24;
 const MIN_EVENT_HEIGHT = 20;
+
+export const DAY_PX_PER_MINUTE = HOUR_HEIGHT / 60;
 
 function parseLocalDate(str: string): Date {
   if (!str) return new Date();
@@ -36,6 +39,10 @@ function padTwo(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+function dateStr(d: Date): string {
+  return `${d.getFullYear()}-${padTwo(d.getMonth() + 1)}-${padTwo(d.getDate())}`;
+}
+
 const WEEKDAY_NAMES = [
   "Sonntag", "Montag", "Dienstag", "Mittwoch",
   "Donnerstag", "Freitag", "Samstag",
@@ -44,6 +51,111 @@ const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
   "Juli", "August", "September", "Oktober", "November", "Dezember",
 ];
+
+// ── Draggable Event ─────────────────────────────────────────────────────────
+
+function DraggableDayEvent({
+  ev,
+  top,
+  height,
+  width,
+  left,
+  color,
+  startLabel,
+  endLabel,
+  showTime,
+  showEndTime,
+  showLocation,
+  onEventClick,
+}: {
+  ev: CalendarEvent;
+  top: number;
+  height: number;
+  width: string;
+  left: string;
+  color: string;
+  startLabel: string;
+  endLabel: string;
+  showTime: boolean;
+  showEndTime: boolean;
+  showLocation: boolean;
+  onEventClick: (event: CalendarEvent, rect: DOMRect) => void;
+}) {
+  const { setNodeRef, listeners, attributes, isDragging } = useDraggable({
+    id: `day-event-${ev.uid}-${ev.recurrence_id ?? ev.start}`,
+    data: { event: ev, source: 'day' },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      className={`day-event${isDragging ? " day-event--dragging" : ""}`}
+      style={{
+        top,
+        height,
+        width,
+        left,
+        borderLeftColor: color,
+        background: color + "1a",
+      }}
+      title={[ev.summary, ev.location].filter(Boolean).join(" · ")}
+      onClick={(e) => {
+        e.stopPropagation();
+        onEventClick(ev, (e.currentTarget as HTMLElement).getBoundingClientRect());
+      }}
+    >
+      {height < 28 ? (
+        <div className="day-event-compact">
+          <span className="day-event-compact-title">{ev.summary}</span>
+        </div>
+      ) : (
+        <div className="day-event-inner">
+          <div className="day-event-title">{ev.summary}</div>
+          {showTime && (
+            <div className="day-event-time" style={{ color }}>
+              {startLabel}
+              {showEndTime ? ` – ${endLabel}` : ""}
+            </div>
+          )}
+          {showLocation && (
+            <div className="day-event-location">{ev.location}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Droppable Events-Column ─────────────────────────────────────────────────
+
+function DroppableEventsCol({
+  currentDate,
+  children,
+  onDayClick,
+}: {
+  currentDate: Date;
+  children: React.ReactNode;
+  onDayClick: (date: Date) => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `day-grid-${dateStr(currentDate)}`,
+    data: { dateStr: dateStr(currentDate), target: 'day' },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`day-events-col${isOver ? " day-events-col--drop-over" : ""}`}
+      onClick={() => onDayClick(currentDate)}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ── Hauptkomponente ─────────────────────────────────────────────────────────
 
 export default function DayView({
   currentDate,
@@ -82,12 +194,11 @@ export default function DayView({
     [events, currentDate]
   );
 
-  // Layout with overlap columns
   type LayoutEvent = CalendarEvent & { col: number; totalCols: number };
 
   const layoutEvents = (evs: CalendarEvent[]): LayoutEvent[] => {
-    const sorted = [...evs].sort((a, b) =>
-      parseLocalDate(a.start).getTime() - parseLocalDate(b.start).getTime()
+    const sorted = [...evs].sort(
+      (a, b) => parseLocalDate(a.start).getTime() - parseLocalDate(b.start).getTime()
     );
     const laid: LayoutEvent[] = [];
     const cols: number[] = [];
@@ -124,7 +235,6 @@ export default function DayView({
 
   return (
     <div className="day-view">
-      {/* Header */}
       <div className="day-view-header">
         <div className="day-view-weekday">{WEEKDAY_NAMES[currentDate.getDay()]}</div>
         <div className={`day-view-date${isToday ? " today" : ""}`}>
@@ -151,10 +261,8 @@ export default function DayView({
         )}
       </div>
 
-      {/* Scrollable grid */}
       <div className="day-body" ref={scrollInit}>
         <div className="day-grid" style={{ height: TOTAL_HOURS * HOUR_HEIGHT }}>
-          {/* Hour labels + lines */}
           {hours.map((h) => (
             <div
               key={h}
@@ -168,7 +276,6 @@ export default function DayView({
             </div>
           ))}
 
-          {/* Now indicator */}
           {isToday && (
             <div
               className="day-now-line"
@@ -176,11 +283,7 @@ export default function DayView({
             />
           )}
 
-          {/* Events */}
-          <div
-            className="day-events-col"
-            onClick={() => onDayClick(currentDate)}
-          >
+          <DroppableEventsCol currentDate={currentDate} onDayClick={onDayClick}>
             {laidOut.map((ev) => {
               const evStart = parseLocalDate(ev.start);
               const evEnd = parseLocalDate(ev.end);
@@ -191,65 +294,38 @@ export default function DayView({
               const top = (startMin / 60) * HOUR_HEIGHT;
               const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, MIN_EVENT_HEIGHT);
 
-              // Column layout with gap
               const colGap = 3;
               const width = `calc((100% - ${colGap}px) / ${ev.totalCols} - ${colGap}px)`;
               const left = `calc(${ev.col} * (100% - ${colGap}px) / ${ev.totalCols} + ${colGap}px)`;
 
               const cal = calMap[ev.calendar_id];
               const color = cal?.color || "#888";
-
               const startLabel = `${padTwo(evStart.getHours())}:${padTwo(evStart.getMinutes())}`;
               const endLabel = `${padTwo(evEnd.getHours())}:${padTwo(evEnd.getMinutes())}`;
 
-              // Progressive disclosure based on available height
               const showTime = height >= 38;
               const showEndTime = height >= 52;
               const showLocation = ev.location != null && height >= 70;
 
               return (
-                <div
-                  key={ev.uid}
-                  className="day-event"
-                  style={{
-                    top,
-                    height,
-                    width,
-                    left,
-                    borderLeftColor: color,
-                    background: color + "1a",
-                  }}
-                  title={
-                    [ev.summary, ev.location].filter(Boolean).join(" · ")
-                  }
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onEventClick(ev, (e.currentTarget as HTMLElement).getBoundingClientRect());
-                  }}
-                >
-                  {height < 28 ? (
-                    /* Ultra-compact: just title in one line */
-                    <div className="day-event-compact">
-                      <span className="day-event-compact-title">{ev.summary}</span>
-                    </div>
-                  ) : (
-                    <div className="day-event-inner">
-                      <div className="day-event-title">{ev.summary}</div>
-                      {showTime && (
-                        <div className="day-event-time" style={{ color }}>
-                          {startLabel}
-                          {showEndTime ? ` – ${endLabel}` : ""}
-                        </div>
-                      )}
-                      {showLocation && (
-                        <div className="day-event-location">{ev.location}</div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <DraggableDayEvent
+                  key={ev.uid + ev.start}
+                  ev={ev}
+                  top={top}
+                  height={height}
+                  width={width}
+                  left={left}
+                  color={color}
+                  startLabel={startLabel}
+                  endLabel={endLabel}
+                  showTime={showTime}
+                  showEndTime={showEndTime}
+                  showLocation={showLocation}
+                  onEventClick={onEventClick}
+                />
               );
             })}
-          </div>
+          </DroppableEventsCol>
         </div>
       </div>
     </div>
