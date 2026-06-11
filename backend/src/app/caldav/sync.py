@@ -6,7 +6,7 @@ from icalendar import Calendar as ICalendar
 from sqlalchemy.orm import Session
 
 from app.caldav.client import get_principal
-from app.db.models import Calendar, Event
+from app.db.models import Calendar, Event, EventOverride
 from app.db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -30,15 +30,12 @@ def _parse_dt(value) -> tuple[datetime | None, bool]:
 
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            # Naive datetime von Nextcloud → bereits Lokalzeit, unverändert speichern
             return value.replace(tzinfo=None), False
         else:
-            # Aware datetime (UTC oder beliebige TZID) → nach Europe/Berlin konvertieren
             local = value.astimezone(BERLIN)
             return local.replace(tzinfo=None), False
 
     if isinstance(value, date):
-        # Ganztägiges Event
         return datetime(value.year, value.month, value.day), True
 
     return None, False
@@ -55,7 +52,7 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
         props = caldav_calendar.get_properties([dav.GetCTag()])
         ctag = str(props.get("{http://calendarserver.org/ns/}getctag", ""))
     except Exception:
-        pass  # Some servers don't expose CTag; fall through to full sync
+        pass
 
     db_cal = db.get(Calendar, cal_url)
     if db_cal is None:
@@ -96,12 +93,10 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
         logger.error("Failed to list objects for %s: %s", cal_url, exc)
         return
 
-    # Find local events for this calendar
     local_events: dict[str, Event] = {
         e.uid: e for e in db.query(Event).filter(Event.calendar_id == cal_url).all()
     }
 
-    # Track which UIDs are still on the server
     seen_uids: set[str] = set()
 
     for obj_url, (remote_etag, raw) in remote_objects.items():
@@ -111,67 +106,119 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
             logger.warning("Could not parse iCal for %s: %s", obj_url, exc)
             continue
 
-        seen_in_file: set[str] = set()
-        for component in ical.walk():
-            if component.name != "VEVENT":
-                continue
+        # VEVENTs in Master + Overrides aufteilen
+        master_uid: str | None = None
+        master_component = None
+        override_components: list[tuple[str, object, object]] = []  # (uid, rid_dt, component)
 
-            uid = str(component.get("UID", obj_url))
+        for component in ical.walk("VEVENT"):
+            comp_uid = str(component.get("UID", obj_url))
+            rid_prop = component.get("RECURRENCE-ID")
 
-            # Some clients store multiple VEVENT blocks with the same UID
-            # (expanded recurrences). Take only the master/first occurrence.
-            if uid in seen_in_file:
-                continue
-            seen_in_file.add(uid)
-            seen_uids.add(uid)
-
-            existing = local_events.get(uid)
-            if existing and existing.etag == remote_etag:
-                continue  # unchanged
-
-            summary = str(component.get("SUMMARY", "")) or None
-            location = str(component.get("LOCATION", "")) or None
-            description = str(component.get("DESCRIPTION", "")) or None
-            rrule_prop = component.get("RRULE")
-            rrule = str(rrule_prop.to_ical().decode()) if rrule_prop else None
-
-            start_raw = component.get("DTSTART")
-            start_val = start_raw.dt if start_raw else None
-            start_dt, all_day = _parse_dt(start_val)
-
-            end_raw = component.get("DTEND") or component.get("DURATION")
-            end_val = end_raw.dt if end_raw else None
-            end_dt, _ = _parse_dt(end_val)
-
-            if existing:
-                existing.etag = remote_etag
-                existing.summary = summary
-                existing.start = start_dt
-                existing.end = end_dt
-                existing.all_day = all_day
-                existing.rrule = rrule
-                existing.location = location
-                existing.description = description
-                existing.raw_ical = raw
+            if rid_prop is None:
+                # Master — bei Duplikaten den ersten nehmen
+                if master_component is None:
+                    master_uid = comp_uid
+                    master_component = component
             else:
-                db.add(Event(
-                    uid=uid,
-                    calendar_id=cal_url,
-                    etag=remote_etag,
-                    summary=summary,
-                    start=start_dt,
-                    end=end_dt,
-                    all_day=all_day,
-                    rrule=rrule,
-                    location=location,
-                    description=description,
-                    raw_ical=raw,
-                ))
+                override_components.append((comp_uid, rid_prop.dt, component))
 
-    # Delete events that no longer exist on the server
+        if master_component is None or master_uid is None:
+            logger.warning("No master VEVENT in %s, skipping", obj_url)
+            continue
+
+        seen_uids.add(master_uid)
+
+        existing = local_events.get(master_uid)
+        if existing and existing.etag == remote_etag:
+            # ETag identisch → Datei (Master + Overrides) unverändert, alles überspringen
+            continue
+
+        # Master parsen
+        summary = str(master_component.get("SUMMARY", "")) or None
+        location = str(master_component.get("LOCATION", "")) or None
+        description = str(master_component.get("DESCRIPTION", "")) or None
+        rrule_prop = master_component.get("RRULE")
+        rrule = str(rrule_prop.to_ical().decode()) if rrule_prop else None
+
+        start_raw = master_component.get("DTSTART")
+        start_val = start_raw.dt if start_raw else None
+        start_dt, all_day = _parse_dt(start_val)
+
+        end_raw = master_component.get("DTEND") or master_component.get("DURATION")
+        end_val = end_raw.dt if end_raw else None
+        end_dt, _ = _parse_dt(end_val)
+
+        if existing:
+            existing.etag = remote_etag
+            existing.summary = summary
+            existing.start = start_dt
+            existing.end = end_dt
+            existing.all_day = all_day
+            existing.rrule = rrule
+            existing.location = location
+            existing.description = description
+            existing.raw_ical = raw
+        else:
+            db.add(Event(
+                uid=master_uid,
+                calendar_id=cal_url,
+                etag=remote_etag,
+                summary=summary,
+                start=start_dt,
+                end=end_dt,
+                all_day=all_day,
+                rrule=rrule,
+                location=location,
+                description=description,
+                raw_ical=raw,
+            ))
+            db.flush()  # damit FK für EventOverride existiert
+
+        # Overrides synchronisieren: alles für diese master_uid weg + neu schreiben
+        db.query(EventOverride).filter(
+            EventOverride.master_uid == master_uid
+        ).delete(synchronize_session=False)
+
+        for ov_uid, rid_dt, ov_comp in override_components:
+            if ov_uid != master_uid:
+                continue  # sollte nicht vorkommen
+
+            rid_norm, _ = _parse_dt(rid_dt)
+            if rid_norm is None:
+                continue
+
+            ov_start_raw = ov_comp.get("DTSTART")
+            ov_start_val = ov_start_raw.dt if ov_start_raw else None
+            ov_start_dt, _ = _parse_dt(ov_start_val)
+
+            ov_end_raw = ov_comp.get("DTEND")
+            ov_end_val = ov_end_raw.dt if ov_end_raw else None
+            ov_end_dt, _ = _parse_dt(ov_end_val)
+
+            ov_summary = str(ov_comp.get("SUMMARY", "")) or None
+            ov_location = str(ov_comp.get("LOCATION", "")) or None
+            ov_description = str(ov_comp.get("DESCRIPTION", "")) or None
+
+            db.add(EventOverride(
+                master_uid=master_uid,
+                recurrence_id=rid_norm,
+                start=ov_start_dt,
+                end=ov_end_dt,
+                summary=ov_summary,
+                location=ov_location,
+                description=ov_description,
+            ))
+
+    # Events löschen die nicht mehr auf dem Server sind
     for uid, event in local_events.items():
         if uid not in seen_uids:
             logger.info("Deleting removed event: %s", uid)
+            # Overrides werden via cascade mitgelöscht (passive_deletes + ondelete=CASCADE)
+            # Fallback explizit, falls SQLite FK-Cascade nicht aktiv ist:
+            db.query(EventOverride).filter(
+                EventOverride.master_uid == uid
+            ).delete(synchronize_session=False)
             db.delete(event)
 
     db_cal.ctag = ctag

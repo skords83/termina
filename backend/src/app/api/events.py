@@ -17,7 +17,7 @@ from app.caldav.write import (
     CalDAVTimeoutError,
 )
 from app.caldav.sync import run_sync
-from app.db.models import Event
+from app.db.models import Event, EventOverride
 from app.db.session import get_db
 
 router = APIRouter()
@@ -54,10 +54,20 @@ class EventMove(BaseModel):
     recurrence_id: datetime | None = None
 
 
-# ── RRULE-Expansion ───────────────────────────────────────────────────────────
+# ── RRULE-Expansion mit Override-Anwendung ────────────────────────────────────
 
-def expand_rrule_event(event: Event, from_: datetime, to: datetime) -> list[dict]:
-    """Expandiert ein RRULE-Event und gibt alle Instanzen im Fenster zurück."""
+def expand_rrule_event(
+    event: Event,
+    from_: datetime,
+    to: datetime,
+    overrides: dict[str, EventOverride] | None = None,
+) -> list[dict]:
+    """Expandiert ein RRULE-Event und wendet Overrides an.
+
+    overrides: dict mapping recurrence_id.isoformat() → EventOverride.
+    """
+    overrides = overrides or {}
+
     try:
         from dateutil.rrule import rrulestr
 
@@ -79,24 +89,55 @@ def expand_rrule_event(event: Event, from_: datetime, to: datetime) -> list[dict
 
         result = []
         for inst in instances:
-            inst_start: datetime = inst
-            inst_end: datetime = inst + duration
-            if inst_start >= to or inst_end <= from_:
-                continue
+            inst_key = inst.isoformat()
+            override = overrides.get(inst_key)
 
-            result.append({
-                "uid": event.uid,
-                "calendar_id": event.calendar_id,
-                "summary": event.summary,
-                "start": inst_start,
-                "end": inst_end,
-                "all_day": event.all_day,
-                "location": event.location,
-                "etag": event.etag,
-                "description": event.description,
-                "is_recurring": True,
-                "recurrence_id": inst_start,
-            })
+            if override is not None:
+                # Verschobene Instanz — Override-Daten verwenden
+                ov_start = override.start
+                ov_end = override.end if override.end is not None else (
+                    ov_start + duration if ov_start is not None else None
+                )
+                if ov_start is None:
+                    continue
+                if ov_start >= to or (ov_end is not None and ov_end <= from_):
+                    continue
+
+                result.append({
+                    "uid": event.uid,
+                    "calendar_id": event.calendar_id,
+                    "summary": override.summary or event.summary,
+                    "start": ov_start,
+                    "end": ov_end,
+                    "all_day": event.all_day,
+                    "location": override.location if override.location is not None else event.location,
+                    "etag": event.etag,
+                    "description": override.description if override.description is not None else event.description,
+                    "is_recurring": True,
+                    # recurrence_id bleibt der ursprüngliche Instanz-Zeitpunkt,
+                    # damit weitere Move-Operationen funktionieren
+                    "recurrence_id": inst,
+                })
+            else:
+                # Normale Expansion
+                inst_start: datetime = inst
+                inst_end: datetime = inst + duration
+                if inst_start >= to or inst_end <= from_:
+                    continue
+
+                result.append({
+                    "uid": event.uid,
+                    "calendar_id": event.calendar_id,
+                    "summary": event.summary,
+                    "start": inst_start,
+                    "end": inst_end,
+                    "all_day": event.all_day,
+                    "location": event.location,
+                    "etag": event.etag,
+                    "description": event.description,
+                    "is_recurring": True,
+                    "recurrence_id": inst,
+                })
 
         return result
 
@@ -155,8 +196,22 @@ def get_events(
             "recurrence_id": None,
         })
 
+    # Overrides für rekurrente Events laden (gebündelt, eine Query)
+    overrides_by_uid: dict[str, dict[str, EventOverride]] = {}
+    if rrule_events:
+        uids = [e.uid for e in rrule_events]
+        all_overrides = (
+            db.query(EventOverride)
+            .filter(EventOverride.master_uid.in_(uids))
+            .all()
+        )
+        for ov in all_overrides:
+            if ov.recurrence_id is None:
+                continue
+            overrides_by_uid.setdefault(ov.master_uid, {})[ov.recurrence_id.isoformat()] = ov
+
     for e in rrule_events:
-        result.extend(expand_rrule_event(e, from_, to))
+        result.extend(expand_rrule_event(e, from_, to, overrides_by_uid.get(e.uid, {})))
 
     return result
 
@@ -240,14 +295,12 @@ def post_move(
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
 
-    # Validierung: single/future brauchen recurrence_id
     if body.mode in ("single", "future") and body.recurrence_id is None:
         raise HTTPException(
             status_code=400,
             detail=f"recurrence_id ist für mode='{body.mode}' erforderlich",
         )
 
-    # Validierung: single/future nur bei rekurrenten Events sinnvoll
     if body.mode in ("single", "future") and not event.rrule:
         raise HTTPException(
             status_code=400,
@@ -273,14 +326,52 @@ def post_move(
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
-    # Lokale DB sofort aktualisieren für instant UI feedback (sync räumt später nach)
+    # Lokale DB sofort aktualisieren für instant UI feedback
     if body.mode == "all":
         delta = body.new_start.replace(tzinfo=None) - body.original_start.replace(tzinfo=None)
         if event.start is not None:
             event.start = event.start + delta
         if event.end is not None:
             event.end = event.end + delta
+        # Auch die recurrence_ids existierender Overrides um delta shiften,
+        # damit sie zu den neuen Instanzen passen
+        for ov in db.query(EventOverride).filter(EventOverride.master_uid == uid).all():
+            if ov.recurrence_id is not None:
+                ov.recurrence_id = ov.recurrence_id + delta
+            if ov.start is not None:
+                ov.start = ov.start + delta
+            if ov.end is not None:
+                ov.end = ov.end + delta
         db.commit()
+
+    elif body.mode == "single":
+        # Override sofort in die DB schreiben, damit der nächste GET ihn sieht
+        # (CalDAV-Sync würde das auch tun, aber erst nach ~5s)
+        rid_naive = body.recurrence_id.replace(tzinfo=None) if body.recurrence_id else None
+        if rid_naive is not None:
+            existing_ov = (
+                db.query(EventOverride)
+                .filter(
+                    EventOverride.master_uid == uid,
+                    EventOverride.recurrence_id == rid_naive,
+                )
+                .first()
+            )
+            new_start_naive = body.new_start.replace(tzinfo=None)
+            new_end_naive = body.new_end.replace(tzinfo=None)
+            if existing_ov is not None:
+                existing_ov.start = new_start_naive
+                existing_ov.end = new_end_naive
+            else:
+                db.add(EventOverride(
+                    master_uid=uid,
+                    recurrence_id=rid_naive,
+                    start=new_start_naive,
+                    end=new_end_naive,
+                ))
+            db.commit()
+
+    # mode='future' überlassen wir dem nächsten Sync (komplexer Fall mit neuer UID)
 
     background.add_task(run_sync)
 
@@ -317,6 +408,8 @@ def delete_event_endpoint(
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
+    # Overrides explizit löschen (SQLite-FK-Cascade nicht garantiert aktiv)
+    db.query(EventOverride).filter(EventOverride.master_uid == uid).delete(synchronize_session=False)
     db.delete(event)
     db.commit()
 
