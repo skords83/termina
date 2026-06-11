@@ -384,7 +384,7 @@ export default function App() {
       setTimeout(() => {
         optimistic.clearAll();
         setRefreshNonce((n) => n + 1);
-      }, 1500);
+      }, 1000);
     } catch (err: any) {
       optimistic.clearAll();
       if (err?.type === 'conflict') {
