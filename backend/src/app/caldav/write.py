@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta, date as date_cls
 from typing import Literal
 
 from icalendar import Calendar, Event as ICalEvent
+from icalendar.prop import vRecur
 from caldav import DAVClient
 
 from app.config import settings
@@ -114,6 +115,21 @@ def _strip_rrule_keys(rrule, keys_to_remove: set[str]) -> dict:
     return result
 
 
+def _parse_rrule_string(rrule_str: str | None) -> vRecur | None:
+    """Parst einen RRULE-String (z.B. 'FREQ=WEEKLY;UNTIL=20261231T235959Z') in vRecur."""
+    if not rrule_str:
+        return None
+    # Manche Strings beginnen mit "RRULE:" — abtrennen
+    s = rrule_str.strip()
+    if s.upper().startswith("RRULE:"):
+        s = s[6:]
+    try:
+        return vRecur.from_ical(s)
+    except Exception as e:
+        logger.warning("Konnte RRULE-String nicht parsen: %r (%s)", rrule_str, e)
+        return None
+
+
 def _make_ical(
     uid: str,
     summary: str,
@@ -122,6 +138,7 @@ def _make_ical(
     all_day: bool,
     location: str | None,
     description: str | None,
+    rrule: str | None = None,
 ) -> bytes:
     cal = Calendar()
     cal.add("prodid", "-//Termina//termina//EN")
@@ -133,16 +150,22 @@ def _make_ical(
     ev.add("dtstamp", datetime.now(timezone.utc))
 
     if all_day:
-        ev.add("dtstart", start.date())
-        ev.add("dtend", end.date())
+        ev.add("dtstart", start.date() if isinstance(start, datetime) else start)
+        ev.add("dtend", end.date() if isinstance(end, datetime) else end)
     else:
-        ev.add("dtstart", start)
-        ev.add("dtend", end)
+        s = start.replace(tzinfo=None) if isinstance(start, datetime) and start.tzinfo else start
+        e = end.replace(tzinfo=None) if isinstance(end, datetime) and end.tzinfo else end
+        ev.add("dtstart", s)
+        ev.add("dtend", e)
 
     if location:
         ev.add("location", location)
     if description:
         ev.add("description", description)
+
+    rrule_parsed = _parse_rrule_string(rrule)
+    if rrule_parsed is not None:
+        ev.add("rrule", rrule_parsed)
 
     cal.add_component(ev)
     return cal.to_ical()
@@ -158,9 +181,10 @@ def create_event(
     all_day: bool = False,
     location: str | None = None,
     description: str | None = None,
+    rrule: str | None = None,
 ) -> str:
     uid = str(uuid.uuid4())
-    ical_data = _make_ical(uid, summary, start, end, all_day, location, description)
+    ical_data = _make_ical(uid, summary, start, end, all_day, location, description, rrule)
 
     try:
         client = _get_client()
@@ -188,7 +212,15 @@ def update_event(
     all_day: bool = False,
     location: str | None = None,
     description: str | None = None,
+    rrule: str | None = None,
+    recurrence_id: datetime | None = None,
 ) -> None:
+    """
+    Zwei Pfade:
+      1. recurrence_id is None: Master-Event ersetzen (komplette .ics neu schreiben).
+      2. recurrence_id given: Override-VEVENT für diese Instanz in bestehende .ics einfügen
+         (Master mit RRULE bleibt erhalten).
+    """
     try:
         client = _get_client()
         cal = _find_caldav_calendar(client, calendar_id)
@@ -203,9 +235,56 @@ def update_event(
         if current_etag and current_etag != etag:
             raise ConflictError(f"ETag-Konflikt für Event {uid}")
 
-        ical_data = _make_ical(uid, summary, start, end, all_day, location, description)
-        obj.data = ical_data
-        obj.save()
+        if recurrence_id is None:
+            # Pfad 1: Master ersetzen
+            ical_data = _make_ical(uid, summary, start, end, all_day, location, description, rrule)
+            obj.data = ical_data
+            obj.save()
+        else:
+            # Pfad 2: Override für eine Instanz einfügen
+            ical = Calendar.from_ical(obj.data)
+
+            # Existierenden Override mit gleicher RECURRENCE-ID entfernen
+            to_remove = []
+            for sub in ical.subcomponents:
+                if getattr(sub, "name", None) != "VEVENT":
+                    continue
+                rid = sub.get("RECURRENCE-ID")
+                if rid is None:
+                    continue
+                if _dt_equal(rid.dt, recurrence_id):
+                    to_remove.append(sub)
+            for sub in to_remove:
+                ical.subcomponents.remove(sub)
+
+            # Neuen Override-VEVENT anlegen
+            override = ICalEvent()
+            override.add("UID", uid)
+            override.add("SUMMARY", summary)
+            override.add("DTSTAMP", datetime.now(timezone.utc))
+
+            if all_day:
+                rid_val = recurrence_id.date() if isinstance(recurrence_id, datetime) else recurrence_id
+                override.add("RECURRENCE-ID", rid_val)
+                override.add("DTSTART", start.date() if isinstance(start, datetime) else start)
+                override.add("DTEND", end.date() if isinstance(end, datetime) else end)
+            else:
+                rid_naive = recurrence_id.replace(tzinfo=None) if recurrence_id.tzinfo else recurrence_id
+                s = start.replace(tzinfo=None) if isinstance(start, datetime) and start.tzinfo else start
+                e = end.replace(tzinfo=None) if isinstance(end, datetime) and end.tzinfo else end
+                override.add("RECURRENCE-ID", rid_naive)
+                override.add("DTSTART", s)
+                override.add("DTEND", e)
+
+            if location:
+                override.add("LOCATION", location)
+            if description:
+                override.add("DESCRIPTION", description)
+
+            ical.add_component(override)
+            obj.data = ical.to_ical()
+            obj.save()
+
     except (ValueError, ConflictError):
         raise
     except Exception as e:
@@ -411,9 +490,6 @@ def _apply_move_future(
     """
     Setzt UNTIL im Master-RRULE (= alte Serie endet vor recurrence_id),
     erstellt neues Event mit eigener UID ab new_start mit gleicher RRULE.
-
-    WICHTIG: UNTIL muss zur Form des Master-DTSTART passen, sonst rechnet
-    der CalDAV-Server (oder dateutil bei der Expansion) im falschen TZ.
     """
     rrule = master.get("RRULE")
     if rrule is None:
@@ -425,12 +501,10 @@ def _apply_move_future(
         master_aware, recurrence_id, all_day,
     )
 
-    # UNTIL passend zur Master-Form berechnen
     if all_day:
         rid_date = recurrence_id.date() if isinstance(recurrence_id, datetime) else recurrence_id
         until_val = rid_date - timedelta(days=1)
     else:
-        # recurrence_id kommt vom Frontend als naive Berlin-Lokalzeit
         rid_dt = recurrence_id if isinstance(recurrence_id, datetime) else datetime(
             recurrence_id.year, recurrence_id.month, recurrence_id.day
         )
@@ -438,22 +512,18 @@ def _apply_move_future(
         until_naive_local = rid_naive - timedelta(seconds=1)
 
         if master_aware:
-            # Master hat TZID → UNTIL muss in UTC sein (RFC 5545)
             until_val = until_naive_local.replace(tzinfo=BERLIN).astimezone(timezone.utc)
         else:
-            # Master ist floating → UNTIL bleibt naive
             until_val = until_naive_local
 
     logger.info("move_event[future] setting UNTIL=%s (master_aware=%s)", until_val, master_aware)
 
-    # RRULE rebuild: UNTIL/COUNT raus, neues UNTIL rein
     new_rrule_dict = _strip_rrule_keys(rrule, {"UNTIL", "COUNT"})
     new_rrule_dict["UNTIL"] = [until_val]
 
     master.pop("RRULE", None)
     master.add("RRULE", new_rrule_dict)
 
-    # Overrides nach recurrence_id verwerfen (gehören zur neuen Serie)
     to_remove = []
     for sub in ical.subcomponents:
         if getattr(sub, "name", None) != "VEVENT":
@@ -471,7 +541,6 @@ def _apply_move_future(
     for sub in to_remove:
         ical.subcomponents.remove(sub)
 
-    # Neues Event mit eigener UID, frische RRULE ohne UNTIL/COUNT
     new_uid = str(uuid.uuid4())
     new_cal = Calendar()
     new_cal.add("prodid", "-//Termina//termina//EN")
