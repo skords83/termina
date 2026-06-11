@@ -33,6 +33,7 @@ class EventCreate(BaseModel):
     all_day: bool = False
     location: str | None = None
     description: str | None = None
+    rrule: str | None = None
 
 
 class EventUpdate(BaseModel):
@@ -43,6 +44,10 @@ class EventUpdate(BaseModel):
     all_day: bool = False
     location: str | None = None
     description: str | None = None
+    rrule: str | None = None
+    # Bei Serien-Edit mit scope="single": recurrence_id der zu ändernden Instanz.
+    # Das Backend legt dann einen EventOverride an statt den Master zu ändern.
+    recurrence_id: datetime | None = None
 
 
 class EventMove(BaseModel):
@@ -110,6 +115,7 @@ def expand_rrule_event(
                     "description": override.description if override.description is not None else event.description,
                     "is_recurring": True,
                     "recurrence_id": inst,
+                    "rrule": event.rrule,
                 })
             else:
                 inst_start: datetime = inst
@@ -129,6 +135,7 @@ def expand_rrule_event(
                     "description": event.description,
                     "is_recurring": True,
                     "recurrence_id": inst,
+                    "rrule": event.rrule,
                 })
 
         return result
@@ -147,6 +154,7 @@ def expand_rrule_event(
                 "description": event.description,
                 "is_recurring": True,
                 "recurrence_id": event.start,
+                "rrule": event.rrule,
             }]
         return []
 
@@ -201,6 +209,7 @@ def get_events(
             "description": e.description,
             "is_recurring": False,
             "recurrence_id": None,
+            "rrule": None,
         })
 
     overrides_by_uid: dict[str, dict[str, EventOverride]] = {}
@@ -240,6 +249,7 @@ def post_event(
             all_day=body.all_day,
             location=body.location,
             description=body.description,
+            rrule=body.rrule,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -264,6 +274,67 @@ def put_event(
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
 
+    rid_naive = body.recurrence_id.replace(tzinfo=None) if body.recurrence_id else None
+
+    # ── Scope: Nur diese Instanz ──────────────────────────────────────────────
+    # Wenn recurrence_id mitgegeben → nur diese Instanz als Override speichern,
+    # Master-Event und seine RRULE bleiben unverändert.
+    if rid_naive is not None:
+        existing_ov = (
+            db.query(EventOverride)
+            .filter(
+                EventOverride.master_uid == uid,
+                EventOverride.recurrence_id == rid_naive,
+            )
+            .first()
+        )
+        start_naive = body.start.replace(tzinfo=None)
+        end_naive = body.end.replace(tzinfo=None)
+
+        if existing_ov is not None:
+            existing_ov.summary = body.summary
+            existing_ov.start = start_naive
+            existing_ov.end = end_naive
+            existing_ov.location = body.location
+            existing_ov.description = body.description
+        else:
+            db.add(EventOverride(
+                master_uid=uid,
+                recurrence_id=rid_naive,
+                summary=body.summary,
+                start=start_naive,
+                end=end_naive,
+                location=body.location,
+                description=body.description,
+            ))
+        db.commit()
+
+        # Auch in Nextcloud schreiben (Override-VEVENT via PUT)
+        try:
+            update_event(
+                calendar_id=event.calendar_id,
+                uid=uid,
+                etag=body.etag,
+                summary=body.summary,
+                start=body.start,
+                end=body.end,
+                all_day=body.all_day,
+                location=body.location,
+                description=body.description,
+                rrule=event.rrule,  # Master-RRULE bleibt erhalten
+                recurrence_id=body.recurrence_id,
+            )
+        except ConflictError:
+            raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except CalDAVTimeoutError as e:
+            raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
+
+        background.add_task(run_sync)
+        return {"uid": uid}
+
+    # ── Scope: Alle Termine der Serie (oder normaler Termin) ──────────────────
     try:
         update_event(
             calendar_id=event.calendar_id,
@@ -275,6 +346,7 @@ def put_event(
             all_day=body.all_day,
             location=body.location,
             description=body.description,
+            rrule=body.rrule,
         )
     except ConflictError:
         raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
@@ -332,7 +404,7 @@ def post_move(
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
 
-    # Lokale DB sofort aktualisieren — damit Frontend-Refetch (~1.5s) den neuen Stand sieht
+    # Lokale DB sofort aktualisieren
     if body.mode == "all":
         delta = body.new_start.replace(tzinfo=None) - body.original_start.replace(tzinfo=None)
         if event.start is not None:
@@ -379,29 +451,22 @@ def post_move(
         new_end_naive = body.new_end.replace(tzinfo=None)
 
         if rid_naive is not None and event.rrule:
-            # 1. Master-RRULE in DB: UNTIL setzen (= recurrence_id - 1 Sekunde, naive)
             until_dt = rid_naive - timedelta(seconds=1)
             until_str = until_dt.strftime("%Y%m%dT%H%M%S")
             new_master_rrule = _strip_rrule_str(event.rrule, {"UNTIL", "COUNT"})
             event.rrule = f"{new_master_rrule};UNTIL={until_str}" if new_master_rrule else f"UNTIL={until_str}"
 
-            # 2. Overrides ab recurrence_id löschen (gehören zur neuen Serie)
             db.query(EventOverride).filter(
                 EventOverride.master_uid == uid,
                 EventOverride.recurrence_id >= rid_naive,
             ).delete(synchronize_session=False)
 
-        # 3. Neues Event mit neuer UID anlegen (mit frischer RRULE ohne UNTIL/COUNT)
         if "new_uid" in result and result["new_uid"]:
             fresh_rrule = _strip_rrule_str(event.rrule, {"UNTIL", "COUNT"}) if event.rrule else None
-            # Stripping ohne UNTIL/COUNT auf event.rrule angewendet — aber event.rrule hat schon UNTIL!
-            # Daher: vom ORIGINAL-RRULE-String ausgehen. Den haben wir nicht mehr direkt,
-            # aber wir können vom gerade konstruierten new_master_rrule ausgehen
-            # (das war der Original-String ohne UNTIL/COUNT).
             db.add(Event(
                 uid=result["new_uid"],
                 calendar_id=event.calendar_id,
-                etag=None,  # wird beim nächsten Sync gesetzt
+                etag=None,
                 summary=event.summary,
                 start=new_start_naive,
                 end=new_end_naive,

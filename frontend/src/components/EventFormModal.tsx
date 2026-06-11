@@ -1,29 +1,14 @@
 // frontend/src/components/EventFormModal.tsx
 //
 // Modal für Erstellen und Bearbeiten von Terminen.
+// Unterstützt jetzt auch Serientermine (RRULE).
 //
 // Props:
 //   mode="create"  → Leeres Formular, `defaultDate` als Startwert
 //   mode="edit"    → Formular mit `event` vorgefüllt, sendet PUT + ETag
 //
-// Verwendung (Erstellen):
-//   <EventFormModal
-//     mode="create"
-//     calendars={calendars}
-//     defaultDate="2026-06-15"
-//     defaultCalendarId={...}
-//     onClose={() => setCreateModal(null)}
-//     onSaved={(uid) => { /* optimistic oder refresh */ }}
-//   />
-//
-// Verwendung (Bearbeiten):
-//   <EventFormModal
-//     mode="edit"
-//     calendars={calendars}
-//     event={event}
-//     onClose={() => setEditModal(null)}
-//     onSaved={(uid) => { /* optimistic update */ }}
-//   />
+// Bei Serien-Edit (event.is_recurring === true) erscheint zuerst
+// ein Auswahl-Dialog: "Nur diese Instanz" oder "Alle zukünftigen" oder "Alle".
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createEvent, updateEvent } from '../api/write';
@@ -58,11 +43,47 @@ interface EditProps extends BaseProps {
 
 type Props = CreateProps | EditProps;
 
-// ── Hilfsfunktionen ───────────────────────────────────────────────────────────
+// ── RRULE-Helpers ─────────────────────────────────────────────────────────────
+
+type RecurFreq = 'none' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
+
+const FREQ_LABELS: Record<RecurFreq, string> = {
+  none: 'Nicht wiederholen',
+  DAILY: 'Täglich',
+  WEEKLY: 'Wöchentlich',
+  MONTHLY: 'Monatlich',
+  YEARLY: 'Jährlich',
+};
+
+/** Extrahiert FREQ und UNTIL aus einem RRULE-String. */
+function parseRrule(rrule: string | null | undefined): { freq: RecurFreq; until: string } {
+  if (!rrule) return { freq: 'none', until: '' };
+  const freqMatch = rrule.match(/FREQ=([A-Z]+)/);
+  const untilMatch = rrule.match(/UNTIL=(\d{8}(?:T\d{6}Z?)?)/);
+  const freq = (freqMatch?.[1] ?? 'none') as RecurFreq;
+  let until = '';
+  if (untilMatch) {
+    // "20261231" → "2026-12-31"
+    const raw = untilMatch[1].slice(0, 8);
+    until = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+  }
+  return { freq, until };
+}
+
+/** Baut einen RRULE-String aus freq + optionalem Enddatum. */
+function buildRrule(freq: RecurFreq, until: string): string | null {
+  if (freq === 'none') return null;
+  let s = `FREQ=${freq}`;
+  if (until) {
+    const compact = until.replace(/-/g, '');
+    s += `;UNTIL=${compact}T235959Z`;
+  }
+  return s;
+}
+
+// ── Datum/Zeit-Helpers ────────────────────────────────────────────────────────
 
 function toLocalDatetimeValue(isoStr: string): string {
-  // "2026-06-15T10:00:00Z" → "2026-06-15T12:00" (MESZ)
-  // Naive strings (ohne Z) direkt nehmen
   if (!isoStr.endsWith('Z') && !isoStr.includes('+')) {
     return isoStr.slice(0, 16);
   }
@@ -75,14 +96,10 @@ function toLocalDatetimeValue(isoStr: string): string {
 }
 
 function toLocalDateValue(isoStr: string): string {
-  // All-day: "2026-06-15" oder "2026-06-15T..." → nur Datum
   return isoStr.slice(0, 10);
 }
 
 function localDatetimeToISO(localStr: string): string {
-  // "2026-06-15T10:00" → "2026-06-15T10:00:00" (naive, kein Z)
-  // Backend erwartet naive strings für lokale Zeiten oder UTC mit Z
-  // Wir senden als lokale Zeit ohne Z – Backend speichert as-is
   return `${localStr}:00`;
 }
 
@@ -145,6 +162,8 @@ const S = {
     display: 'flex',
     flexDirection: 'column' as const,
     gap: '1rem',
+    maxHeight: '90vh',
+    overflowY: 'auto' as const,
   },
   header: {
     display: 'flex',
@@ -240,6 +259,25 @@ const S = {
     fontSize: '0.875rem',
     color: '#aaa',
   },
+  divider: {
+    borderTop: '1px solid #2a2a2a',
+    margin: '0.25rem 0',
+  },
+  recurBox: {
+    background: '#181818',
+    border: '1px solid #2a2a2a',
+    borderRadius: '0.5rem',
+    padding: '0.75rem',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '0.625rem',
+  },
+  recurRow: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '0.75rem',
+    alignItems: 'end',
+  },
   footer: {
     display: 'flex',
     justifyContent: 'flex-end',
@@ -271,24 +309,130 @@ const S = {
     opacity: 0.5,
     cursor: 'not-allowed',
   },
-  calendarDot: (color: string) => ({
-    display: 'inline-block',
-    width: '0.5rem',
-    height: '0.5rem',
-    borderRadius: '50%',
-    background: color,
-    marginRight: '0.4rem',
-    flexShrink: 0,
+  // Scope-Dialog (Nur diese / Alle)
+  scopeOverlay: {
+    position: 'fixed' as const,
+    inset: 0,
+    background: 'rgba(0,0,0,0.65)',
+    backdropFilter: 'blur(2px)',
+    zIndex: 1100,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scopeBox: {
+    background: '#1e1e1e',
+    border: '1px solid #2e2e2e',
+    borderRadius: '0.75rem',
+    padding: '1.5rem',
+    width: '100%',
+    maxWidth: '22rem',
+    boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+    fontFamily: 'DM Sans, sans-serif',
+    color: '#e8e6e3',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '1rem',
+  },
+  scopeTitle: {
+    fontSize: '0.9375rem',
+    fontWeight: 600,
+    color: '#f0eeeb',
+    margin: 0,
+  },
+  scopeSubtitle: {
+    fontSize: '0.8125rem',
+    color: '#777',
+    margin: '-0.5rem 0 0',
+  },
+  scopeOptions: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '0.375rem',
+  },
+  scopeOption: (active: boolean) => ({
+    background: active ? 'rgba(91,142,247,0.12)' : '#151515',
+    border: `1px solid ${active ? '#5b8ef7' : '#2e2e2e'}`,
+    borderRadius: '0.375rem',
+    color: active ? '#a8c4fb' : '#ccc',
+    padding: '0.625rem 0.875rem',
+    fontSize: '0.875rem',
+    fontFamily: 'DM Sans, sans-serif',
+    cursor: 'pointer',
+    textAlign: 'left' as const,
+    transition: 'all 0.1s',
   }),
+  scopeFooter: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '0.5rem',
+    borderTop: '1px solid #2a2a2a',
+    paddingTop: '0.75rem',
+  },
 };
 
-// ── Komponente ────────────────────────────────────────────────────────────────
+// ── Scope-Dialog (bei Serien-Edit) ────────────────────────────────────────────
+
+type EditScope = 'single' | 'all';
+
+interface ScopeDialogProps {
+  onSelect: (scope: EditScope) => void;
+  onCancel: () => void;
+}
+
+function ScopeDialog({ onSelect, onCancel }: ScopeDialogProps) {
+  const [selected, setSelected] = useState<EditScope>('single');
+
+  return (
+    <div style={S.scopeOverlay}>
+      <div style={S.scopeBox}>
+        <div>
+          <h2 style={S.scopeTitle}>Serientermin bearbeiten</h2>
+          <p style={S.scopeSubtitle}>Welche Termine sollen geändert werden?</p>
+        </div>
+        <div style={S.scopeOptions}>
+          <button
+            style={S.scopeOption(selected === 'single')}
+            onClick={() => setSelected('single')}
+          >
+            Nur dieser Termin
+          </button>
+          <button
+            style={S.scopeOption(selected === 'all')}
+            onClick={() => setSelected('all')}
+          >
+            Alle Termine der Serie
+          </button>
+        </div>
+        <div style={S.scopeFooter}>
+          <button style={S.btnCancel} onClick={onCancel}>
+            Abbrechen
+          </button>
+          <button
+            style={S.btnSave}
+            onClick={() => onSelect(selected)}
+          >
+            Weiter
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Hauptkomponente ───────────────────────────────────────────────────────────
 
 export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props) {
   const { showToast } = useToast();
 
   const isEdit = props.mode === 'edit';
   const existingEvent = isEdit ? props.event : undefined;
+
+  // Bei Serientermin-Edit zuerst Scope-Dialog zeigen
+  // null = noch nicht entschieden, 'single' oder 'all' = entschieden
+  const [editScope, setEditScope] = useState<EditScope | null>(
+    isEdit && existingEvent?.is_recurring ? null : 'all'
+  );
 
   const defaultStartStr = isEdit
     ? existingEvent!.all_day
@@ -318,12 +462,20 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
   const [description, setDescription] = useState(existingEvent?.description ?? '');
   const [saving, setSaving] = useState(false);
 
-  const summaryRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    summaryRef.current?.focus();
-  }, []);
+  // RRULE-State
+  const initialRrule = parseRrule(existingEvent?.rrule);
+  const [recurFreq, setRecurFreq] = useState<RecurFreq>(initialRrule.freq);
+  const [recurUntil, setRecurUntil] = useState(initialRrule.until);
 
-  // Esc schließt
+  const summaryRef = useRef<HTMLInputElement>(null);
+
+  // Focus erst setzen wenn Scope-Dialog weg ist
+  useEffect(() => {
+    if (editScope !== null) {
+      summaryRef.current?.focus();
+    }
+  }, [editScope]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -334,11 +486,9 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
 
   const handleAllDayToggle = () => {
     if (!allDay) {
-      // Wechsel zu All-day: Datum extrahieren
       setStartStr(startStr.slice(0, 10));
       setEndStr(endStr.slice(0, 10));
     } else {
-      // Wechsel zu timed: Uhrzeit anhängen
       setStartStr(`${startStr}T09:00`);
       setEndStr(`${startStr}T10:00`);
     }
@@ -347,13 +497,8 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
 
   const handleStartChange = (val: string) => {
     setStartStr(val);
-    // End immer >= Start halten
-    if (!allDay && val > endStr) {
-      setEndStr(addHour(val));
-    }
-    if (allDay && val > endStr) {
-      setEndStr(val);
-    }
+    if (!allDay && val > endStr) setEndStr(addHour(val));
+    if (allDay && val > endStr) setEndStr(val);
   };
 
   const buildPayload = (): CreateEventPayload => ({
@@ -364,6 +509,7 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
     all_day: allDay,
     location: location.trim() || null,
     description: description.trim() || null,
+    rrule: buildRrule(recurFreq, recurUntil),
   });
 
   const handleSubmit = useCallback(async () => {
@@ -379,6 +525,10 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
         const result = await updateEvent(existingEvent!.uid, {
           ...payload,
           etag: existingEvent!.etag!,
+          // Bei single-scope: recurrence_id mitschicken damit Backend nur diese Instanz ändert
+          ...(editScope === 'single' && existingEvent!.recurrence_id
+            ? { recurrence_id: existingEvent!.recurrence_id }
+            : {}),
         });
         uid = result.uid;
         savedEvent = {
@@ -401,6 +551,7 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
           location: payload.location ?? undefined,
           description: payload.description,
           etag: null,
+          is_recurring: !!payload.rrule,
         };
       }
 
@@ -414,14 +565,24 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
       const writeErr = err as WriteError;
       showToast(describeWriteError(writeErr), 'error');
       if (writeErr.type === 'conflict') {
-        onClose(); // EventPopup schließen; User muss neu laden
+        onClose();
       }
     } finally {
       setSaving(false);
     }
-  }, [summary, calendarId, allDay, startStr, endStr, location, description, isEdit, existingEvent, showToast, onSaved, onClose]);
+  }, [summary, calendarId, allDay, startStr, endStr, location, description, recurFreq, recurUntil, isEdit, existingEvent, editScope, showToast, onSaved, onClose]);
 
   const canSave = summary.trim().length > 0 && calendarId;
+
+  // Scope-Dialog noch offen
+  if (editScope === null) {
+    return (
+      <ScopeDialog
+        onSelect={(scope) => setEditScope(scope)}
+        onCancel={onClose}
+      />
+    );
+  }
 
   return (
     <div style={S.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -449,21 +610,23 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
           />
         </div>
 
-        {/* Kalender */}
-        <div style={S.field}>
-          <label style={S.label}>Kalender</label>
-          <select
-            style={S.select}
-            value={calendarId}
-            onChange={(e) => setCalendarId(e.target.value)}
-          >
-            {calendars.map((cal) => (
-              <option key={cal.id} value={cal.id}>
-                {cal.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Kalender (nur bei create; beim Edit nicht wechselbar) */}
+        {!isEdit && (
+          <div style={S.field}>
+            <label style={S.label}>Kalender</label>
+            <select
+              style={S.select}
+              value={calendarId}
+              onChange={(e) => setCalendarId(e.target.value)}
+            >
+              {calendars.map((cal) => (
+                <option key={cal.id} value={cal.id}>
+                  {cal.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Ganztag-Toggle */}
         <label style={S.toggle}>
@@ -518,7 +681,63 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
           </div>
         </div>
 
-        {/* Ort (optional) */}
+        {/* ── Wiederholung ─────────────────────────────────────────────────── */}
+        <div style={S.divider} />
+        <div style={S.field}>
+          <label style={S.label}>Wiederholung</label>
+          <div style={S.recurBox}>
+            <div style={S.recurRow}>
+              <div style={S.field}>
+                <label style={{ ...S.label, textTransform: 'none', letterSpacing: 0, fontSize: '0.75rem' }}>
+                  Häufigkeit
+                </label>
+                <select
+                  style={S.select}
+                  value={recurFreq}
+                  onChange={(e) => {
+                    setRecurFreq(e.target.value as RecurFreq);
+                    if (e.target.value === 'none') setRecurUntil('');
+                  }}
+                  // Bei single-scope Edit: RRULE-Änderung ist nicht sinnvoll (nur diese Instanz)
+                  disabled={editScope === 'single'}
+                >
+                  {(Object.keys(FREQ_LABELS) as RecurFreq[]).map((f) => (
+                    <option key={f} value={f}>
+                      {FREQ_LABELS[f]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {recurFreq !== 'none' && (
+                <div style={S.field}>
+                  <label style={{ ...S.label, textTransform: 'none', letterSpacing: 0, fontSize: '0.75rem' }}>
+                    Endet am (optional)
+                  </label>
+                  <input
+                    type="date"
+                    style={{
+                      ...S.input,
+                      opacity: editScope === 'single' ? 0.4 : 1,
+                    }}
+                    value={recurUntil}
+                    onChange={(e) => setRecurUntil(e.target.value)}
+                    disabled={editScope === 'single'}
+                  />
+                </div>
+              )}
+            </div>
+
+            {editScope === 'single' && (
+              <p style={{ margin: 0, fontSize: '0.75rem', color: '#666' }}>
+                Wiederholungseinstellungen gelten für alle Termine der Serie — hier nicht änderbar.
+              </p>
+            )}
+          </div>
+        </div>
+        <div style={S.divider} />
+
+        {/* Ort */}
         <div style={S.field}>
           <label style={S.label}>Ort</label>
           <input
@@ -529,7 +748,7 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
           />
         </div>
 
-        {/* Beschreibung (optional) */}
+        {/* Beschreibung */}
         <div style={S.field}>
           <label style={S.label}>Beschreibung</label>
           <textarea

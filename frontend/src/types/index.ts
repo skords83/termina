@@ -16,6 +16,7 @@ export interface CalendarEvent {
   etag?: string | null;
   is_recurring?: boolean;
   recurrence_id?: string | null; // ISO 8601, das ursprüngliche Datum dieser Instanz
+  rrule?: string | null;         // RRULE-String, z.B. "FREQ=WEEKLY;UNTIL=20261231T235959Z"
 }
 
 export interface CreateEventPayload {
@@ -26,6 +27,7 @@ export interface CreateEventPayload {
   all_day?: boolean;
   location?: string | null;
   description?: string | null;
+  rrule?: string | null;
 }
 
 export interface UpdateEventPayload {
@@ -36,6 +38,9 @@ export interface UpdateEventPayload {
   all_day?: boolean;
   location?: string | null;
   description?: string | null;
+  rrule?: string | null;
+  /** Nur bei Serientermin + editScope='single': recurrence_id der zu ändernden Instanz */
+  recurrence_id?: string | null;
 }
 
 export interface DeleteEventPayload {
