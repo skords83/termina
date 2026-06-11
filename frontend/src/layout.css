@@ -1,0 +1,307 @@
+/* ═══════════════════════════════════════════════════════════════════
+   LAYOUT — App shell, topbar, sidebar
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ─── App shell ──────────────────────────────────────────────── */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ─── Main layout ────────────────────────────────────────────── */
+.main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Topbar ─────────────────────────────────────────────────── */
+.topbar {
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.topbar-left,
+.topbar-right {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.topbar-right {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.topbar-center {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.app-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-name {
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+
+.month-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  min-width: 180px;
+  text-align: center;
+}
+
+.nav-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+}
+.nav-btn:hover { background: var(--bg-3); color: var(--text); }
+.nav-btn--lg { width: 32px; height: 32px; font-size: 20px; }
+
+.today-btn {
+  padding: 4px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.today-btn:hover {
+  background: var(--bg-3);
+  color: var(--text);
+  border-color: var(--text-3);
+}
+
+.sync-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.7;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50%       { opacity: 1; }
+}
+
+.logout-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  color: var(--text-3);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+}
+.logout-btn:hover { background: var(--bg-3); color: var(--text-2); }
+
+/* ─── View switcher ──────────────────────────────────────────── */
+.view-switcher {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 3px;
+}
+
+.view-btn {
+  padding: 5px 14px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  transition: background 0.1s, color 0.1s;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.view-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.view-btn--active {
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+.view-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.view-switcher button {
+  opacity: 1 !important;
+}
+
+/* Toolbar buttons (search, natural input, sync) */
+.toolbar-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--text-3);
+  font-size: 18px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, color 0.12s;
+  flex-shrink: 0;
+}
+.toolbar-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-2);
+}
+.toolbar-btn--spinning svg,
+.toolbar-btn--spinning {
+  animation: tb-spin 0.8s linear infinite;
+}
+@keyframes tb-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ─── Sidebar ────────────────────────────────────────────────── */
+.sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-2);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  gap: 24px;
+  overflow-y: auto;
+}
+
+/* Mini Calendar */
+.mini-cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.mini-cal-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.mini-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+}
+
+.mini-day-label {
+  font-size: 10px;
+  color: var(--text-3);
+  text-align: center;
+  padding: 2px 0 4px;
+  font-weight: 500;
+}
+
+.mini-day {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  border-radius: 4px;
+  color: var(--text-2);
+  transition: background 0.1s, color 0.1s;
+}
+.mini-day:hover { background: var(--bg-hover); color: var(--text); }
+.mini-day--other { color: var(--text-3); }
+.mini-day--today {
+  background: var(--accent);
+  color: white;
+  font-weight: 600;
+}
+.mini-day--today:hover { background: var(--accent); }
+
+/* Calendar List */
+.cal-list-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+  padding: 0 4px;
+}
+
+.cal-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  border-radius: var(--radius);
+  text-align: left;
+  transition: background 0.1s;
+}
+.cal-item:hover { background: var(--bg-hover); }
+
+.cal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.cal-name {
+  font-size: 13.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cal-item--hidden .cal-name {
+  color: var(--text-3);
+}
