@@ -118,6 +118,9 @@ export default function App() {
   const [activeDrag, setActiveDrag] = useState<CalendarEvent | null>(null);
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
 
+  // Refetch-Trigger: bumpen nach erfolgreichen Schreib-Operationen
+  const [refreshNonce, setRefreshNonce] = useState(0);
+
   const [currentDate, setCurrentDate] = useState<Date>(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -201,7 +204,7 @@ export default function App() {
     };
   }, [view, currentDate]);
 
-  const { events: serverEvents, loading: eventsLoading } = useEvents(token, from, to);
+  const { events: serverEvents, loading: eventsLoading } = useEvents(token, from, to, refreshNonce);
   const events = useMergedEvents(serverEvents);
 
   const visibleCalendarIds = useMemo(
@@ -355,16 +358,16 @@ export default function App() {
     const newStartIso = toIsoLocal(newStart);
     const newEndIso = toIsoLocal(newEnd);
 
-    // Optimistic update für nicht-rekurrente / "all"-Verschiebungen
-    if (!ev.is_recurring || mode === 'all') {
+    // Optimistic update nur für nicht-rekurrente Events.
+    // Bei rekurrenten Events würde updateOptimistic (uid-gekeyt) alle anderen
+    // Expansionen derselben Serie kaputt machen — daher warten wir auf den Refetch.
+    if (!ev.is_recurring) {
       optimistic.updateOptimistic({
         ...ev,
         start: newStartIso,
         end: newEndIso,
       });
     }
-    // Für single/future: kein optimistic update, da das Event seine UID/Identität
-    // möglicherweise ändert (future) oder neue Instanz entsteht.
 
     try {
       await moveEvent(ev.uid, {
@@ -375,7 +378,13 @@ export default function App() {
         new_end: newEndIso,
         recurrence_id: ev.recurrence_id ?? null,
       });
-      setTimeout(() => optimistic.clearAll(), 6000);
+
+      // Backend hat geschrieben + run_sync als BackgroundTask gestartet.
+      // Etwas warten, damit der Sync die DB aktualisiert hat, dann refetchen.
+      setTimeout(() => {
+        optimistic.clearAll();
+        setRefreshNonce((n) => n + 1);
+      }, 1500);
     } catch (err: any) {
       optimistic.clearAll();
       if (err?.type === 'conflict') {

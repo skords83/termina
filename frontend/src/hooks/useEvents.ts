@@ -11,7 +11,8 @@ interface Result {
 export function useEvents(
   token: string | null,
   from: string,
-  to: string
+  to: string,
+  nonce: number = 0
 ): Result {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(false);
@@ -26,7 +27,7 @@ export function useEvents(
       .then(setEvents)
       .catch((err: ApiError) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [token, from, to]);
+  }, [token, from, to, nonce]);
 
   return { events, loading, error };
 }
