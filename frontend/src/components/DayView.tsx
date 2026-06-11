@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { CalendarEvent, Calendar } from "../types/index";
 
 interface DayViewProps {
@@ -11,6 +11,7 @@ interface DayViewProps {
 
 const HOUR_HEIGHT = 64;
 const TOTAL_HOURS = 24;
+const MIN_EVENT_HEIGHT = 20;
 
 function parseLocalDate(str: string): Date {
   if (!str) return new Date();
@@ -29,6 +30,10 @@ function sameDay(a: Date, b: Date): boolean {
 
 function toMinutes(date: Date): number {
   return date.getHours() * 60 + date.getMinutes();
+}
+
+function padTwo(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
 const WEEKDAY_NAMES = [
@@ -79,10 +84,11 @@ export default function DayView({
 
   // Layout with overlap columns
   type LayoutEvent = CalendarEvent & { col: number; totalCols: number };
+
   const layoutEvents = (evs: CalendarEvent[]): LayoutEvent[] => {
-    const sorted = [...evs].sort((a, b) => {
-      return parseLocalDate(a.start).getTime() - parseLocalDate(b.start).getTime();
-    });
+    const sorted = [...evs].sort((a, b) =>
+      parseLocalDate(a.start).getTime() - parseLocalDate(b.start).getTime()
+    );
     const laid: LayoutEvent[] = [];
     const cols: number[] = [];
 
@@ -133,7 +139,9 @@ export default function DayView({
                   key={ev.uid}
                   className="day-allday-event"
                   style={{ background: cal?.color || "#888" }}
-                  onClick={(e) => onEventClick(ev, (e.target as HTMLElement).getBoundingClientRect())}
+                  onClick={(e) =>
+                    onEventClick(ev, (e.currentTarget as HTMLElement).getBoundingClientRect())
+                  }
                 >
                   {ev.summary}
                 </div>
@@ -154,7 +162,7 @@ export default function DayView({
               style={{ top: h * HOUR_HEIGHT, height: HOUR_HEIGHT }}
             >
               <div className="day-hour-label">
-                {h === 0 ? "" : `${String(h).padStart(2, "0")}:00`}
+                {h === 0 ? "" : `${padTwo(h)}:00`}
               </div>
               <div className="day-hour-line" />
             </div>
@@ -169,7 +177,10 @@ export default function DayView({
           )}
 
           {/* Events */}
-          <div className="day-events-col" onClick={() => onDayClick(currentDate)}>
+          <div
+            className="day-events-col"
+            onClick={() => onDayClick(currentDate)}
+          >
             {laidOut.map((ev) => {
               const evStart = parseLocalDate(ev.start);
               const evEnd = parseLocalDate(ev.end);
@@ -178,33 +189,62 @@ export default function DayView({
               if (endMin <= startMin) endMin = startMin + 30;
 
               const top = (startMin / 60) * HOUR_HEIGHT;
-              const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 22);
-              const width = `calc((100% - 4px) / ${ev.totalCols})`;
-              const left = `calc(${ev.col} * (100% - 4px) / ${ev.totalCols})`;
+              const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, MIN_EVENT_HEIGHT);
+
+              // Column layout with gap
+              const colGap = 3;
+              const width = `calc((100% - ${colGap}px) / ${ev.totalCols} - ${colGap}px)`;
+              const left = `calc(${ev.col} * (100% - ${colGap}px) / ${ev.totalCols} + ${colGap}px)`;
 
               const cal = calMap[ev.calendar_id];
               const color = cal?.color || "#888";
+
+              const startLabel = `${padTwo(evStart.getHours())}:${padTwo(evStart.getMinutes())}`;
+              const endLabel = `${padTwo(evEnd.getHours())}:${padTwo(evEnd.getMinutes())}`;
+
+              // Progressive disclosure based on available height
+              const showTime = height >= 38;
+              const showEndTime = height >= 52;
+              const showLocation = ev.location != null && height >= 70;
 
               return (
                 <div
                   key={ev.uid}
                   className="day-event"
-                  style={{ top, height, width, left, borderLeftColor: color, background: color + "1a" }}
+                  style={{
+                    top,
+                    height,
+                    width,
+                    left,
+                    borderLeftColor: color,
+                    background: color + "1a",
+                  }}
+                  title={
+                    [ev.summary, ev.location].filter(Boolean).join(" · ")
+                  }
                   onClick={(e) => {
                     e.stopPropagation();
-                    onEventClick(ev, (e.target as HTMLElement).getBoundingClientRect());
+                    onEventClick(ev, (e.currentTarget as HTMLElement).getBoundingClientRect());
                   }}
                 >
-                  <div className="day-event-title">{ev.summary}</div>
-                  {height > 36 && (
-                    <div className="day-event-time">
-                      {`${String(evStart.getHours()).padStart(2, "0")}:${String(evStart.getMinutes()).padStart(2, "0")}`}
-                      {" – "}
-                      {`${String(evEnd.getHours()).padStart(2, "0")}:${String(evEnd.getMinutes()).padStart(2, "0")}`}
+                  {height < 28 ? (
+                    /* Ultra-compact: just title in one line */
+                    <div className="day-event-compact">
+                      <span className="day-event-compact-title">{ev.summary}</span>
                     </div>
-                  )}
-                  {ev.location && height > 56 && (
-                    <div className="day-event-location">{ev.location}</div>
+                  ) : (
+                    <div className="day-event-inner">
+                      <div className="day-event-title">{ev.summary}</div>
+                      {showTime && (
+                        <div className="day-event-time" style={{ color }}>
+                          {startLabel}
+                          {showEndTime ? ` – ${endLabel}` : ""}
+                        </div>
+                      )}
+                      {showLocation && (
+                        <div className="day-event-location">{ev.location}</div>
+                      )}
+                    </div>
                   )}
                 </div>
               );

@@ -13,6 +13,8 @@ const HOUR_HEIGHT = 56; // px per hour
 const START_HOUR = 0;
 const END_HOUR = 24;
 const TOTAL_HOURS = END_HOUR - START_HOUR;
+// Minimum visible height for an event block (px)
+const MIN_EVENT_HEIGHT = 18;
 
 function getWeekStart(date: Date): Date {
   const d = new Date(date);
@@ -53,8 +55,11 @@ function toMinutes(date: Date): number {
   return date.getHours() * 60 + date.getMinutes();
 }
 
+function padTwo(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
 const WEEKDAYS_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-// WEEKDAYS_LONG removed (unused)
 
 export default function WeekView({
   currentDate,
@@ -73,7 +78,6 @@ export default function WeekView({
     return m;
   }, [calendars]);
 
-  // Separate all-day events from timed events
   const allDayEvents = useMemo(
     () => events.filter((e) => e.all_day),
     [events]
@@ -112,7 +116,6 @@ export default function WeekView({
   }, [allDayEvents, days]);
 
   const hasAllDay = allDayByDay.some((d) => d.length > 0);
-
   const hours = Array.from({ length: TOTAL_HOURS }, (_, i) => i + START_HOUR);
 
   // Scroll to 8:00 on mount
@@ -124,15 +127,14 @@ export default function WeekView({
     }
   };
 
-  // Compute overlapping columns for events in a day
-  function layoutEvents(dayEvents: CalendarEvent[]) {
+  // Layout overlapping events into columns
+  type LayoutEvent = CalendarEvent & { col: number; totalCols: number };
+
+  function layoutEvents(dayEvents: CalendarEvent[]): LayoutEvent[] {
     const sorted = [...dayEvents].sort((a, b) => {
-      const aStart = parseLocalDate(a.start);
-      const bStart = parseLocalDate(b.start);
-      return aStart.getTime() - bStart.getTime();
+      return parseLocalDate(a.start).getTime() - parseLocalDate(b.start).getTime();
     });
 
-    type LayoutEvent = CalendarEvent & { col: number; totalCols: number };
     const laid: LayoutEvent[] = [];
     const cols: number[] = []; // end-time in minutes for each column
 
@@ -149,7 +151,7 @@ export default function WeekView({
       laid.push({ ...ev, col, totalCols: 0 });
     });
 
-    // Fix totalCols
+    // Fix totalCols: find max overlapping column for each event
     laid.forEach((ev) => {
       const evStart = parseLocalDate(ev.start);
       const evEnd = parseLocalDate(ev.end);
@@ -209,7 +211,7 @@ export default function WeekView({
                     style={{ background: cal?.color || "#888" }}
                     onClick={(e) => {
                       e.stopPropagation();
-                      onEventClick(ev, (e.target as HTMLElement).getBoundingClientRect());
+                      onEventClick(ev, (e.currentTarget as HTMLElement).getBoundingClientRect());
                     }}
                   >
                     {ev.summary}
@@ -227,7 +229,7 @@ export default function WeekView({
           className="week-grid"
           style={{ height: TOTAL_HOURS * HOUR_HEIGHT }}
         >
-          {/* Hour lines */}
+          {/* Hour labels */}
           <div className="week-hours">
             {hours.map((h) => (
               <div
@@ -236,7 +238,7 @@ export default function WeekView({
                 style={{ height: HOUR_HEIGHT }}
               >
                 <div className="week-hour-label">
-                  {h === 0 ? "" : `${String(h).padStart(2, "0")}:00`}
+                  {h === 0 ? "" : `${padTwo(h)}:00`}
                 </div>
                 <div className="week-hour-line" />
               </div>
@@ -258,10 +260,7 @@ export default function WeekView({
                   const nowMin = toMinutes(today);
                   const top = (nowMin / 60) * HOUR_HEIGHT;
                   return (
-                    <div
-                      className="week-now-line"
-                      style={{ top }}
-                    />
+                    <div className="week-now-line" style={{ top }} />
                   );
                 })()}
 
@@ -274,30 +273,57 @@ export default function WeekView({
                   const durationMin = endMin - startMin;
 
                   const top = (startMin / 60) * HOUR_HEIGHT;
-                  const height = Math.max((durationMin / 60) * HOUR_HEIGHT, 18);
-                  const width = `calc((100% - 2px) / ${ev.totalCols})`;
-                  const left = `calc(${ev.col} * (100% - 2px) / ${ev.totalCols})`;
+                  const height = Math.max((durationMin / 60) * HOUR_HEIGHT, MIN_EVENT_HEIGHT);
+
+                  // Leave a 2px gap between columns
+                  const colGap = 2;
+                  const width = `calc((100% - ${colGap}px) / ${ev.totalCols} - ${colGap}px)`;
+                  const left = `calc(${ev.col} * (100% - ${colGap}px) / ${ev.totalCols} + ${colGap}px)`;
 
                   const cal = calMap[ev.calendar_id];
                   const color = cal?.color || "#888";
+
+                  // How much content we can show
+                  const showTime = height >= 36;
+                  const startLabel = `${padTwo(evStart.getHours())}:${padTwo(evStart.getMinutes())}`;
 
                   return (
                     <div
                       key={ev.uid}
                       className="week-event"
-                      style={{ top, height, width, left, borderColor: color, background: color + "22" }}
+                      style={{
+                        top,
+                        height,
+                        width,
+                        left,
+                        borderLeftColor: color,
+                        background: color + "22",
+                      }}
+                      title={ev.summary}
                       onClick={(e) => {
                         e.stopPropagation();
-                        onEventClick(ev, (e.target as HTMLElement).getBoundingClientRect());
+                        onEventClick(ev, (e.currentTarget as HTMLElement).getBoundingClientRect());
                       }}
                     >
-                      <span className="week-event-dot" style={{ background: color }} />
-                      <span className="week-event-title">{ev.summary}</span>
-                      {height > 32 && (
-                        <span className="week-event-time">
-                          {evStart.getHours().toString().padStart(2, "0")}:
-                          {evStart.getMinutes().toString().padStart(2, "0")}
-                        </span>
+                      {/* Single-line layout for very short events */}
+                      {height < 36 ? (
+                        <div className="week-event-compact">
+                          <span
+                            className="week-event-compact-dot"
+                            style={{ background: color }}
+                          />
+                          <span className="week-event-compact-title">{ev.summary}</span>
+                        </div>
+                      ) : (
+                        /* Normal layout */
+                        <div className="week-event-body">
+                          <div className="week-event-title">{ev.summary}</div>
+                          {showTime && (
+                            <div className="week-event-time" style={{ color }}>
+                              {startLabel}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   );
