@@ -113,6 +113,7 @@ export default function App() {
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
   const [showSearch, setShowSearch] = useState(false);
   const [showNatural, setShowNatural] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   // DnD-State
   const [activeDrag, setActiveDrag] = useState<CalendarEvent | null>(null);
@@ -242,6 +243,24 @@ export default function App() {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
     setCurrentDate(d);
+  }
+
+  async function handleSync() {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await fetch('/api/sync', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      // Fehler ignorieren — Refetch trotzdem
+    } finally {
+      setTimeout(() => {
+        setRefreshNonce((n) => n + 1);
+        setSyncing(false);
+      }, 800);
+    }
   }
 
   useEffect(() => {
@@ -446,8 +465,32 @@ export default function App() {
           </div>
 
           <div className="topbar-right">
-            <button className="toolbar-btn" onClick={() => setShowSearch(true)} title="Suche (⌘K)">⌕</button>
-            <button className="toolbar-btn" onClick={() => setShowNatural(true)} title="Termin in Fließtext eingeben (⌘N)">✎</button>
+            {/* Suche */}
+            <button className="toolbar-btn" onClick={() => setShowSearch(true)} title="Suche (⌘K)">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+                <circle cx="7" cy="7" r="4.5" />
+                <line x1="10.5" y1="10.5" x2="14" y2="14" />
+              </svg>
+            </button>
+            {/* Fließtext-Eingabe */}
+            <button className="toolbar-btn" onClick={() => setShowNatural(true)} title="Termin in Fließtext eingeben (⌘N)">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 12.5V10l7.5-7.5 2.5 2.5L4.5 12.5H2Z" />
+                <line x1="9" y1="4" x2="12" y2="7" />
+              </svg>
+            </button>
+            {/* Manueller Sync */}
+            <button
+              className={`toolbar-btn${syncing ? ' toolbar-btn--spinning' : ''}`}
+              onClick={handleSync}
+              title="Sync mit Nextcloud"
+              disabled={syncing}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13.5 8a5.5 5.5 0 1 1-1.1-3.3" />
+                <polyline points="13.5 2 13.5 5.5 10 5.5" />
+              </svg>
+            </button>
             <div className="view-switcher">
               {(['month', 'week', 'day', 'agenda'] as const).map((v) => (
                 <button
