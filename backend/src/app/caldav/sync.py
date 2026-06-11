@@ -3,6 +3,7 @@ from datetime import datetime, timezone, date
 from typing import Any
 import zoneinfo
 
+from lxml import etree
 from icalendar import Calendar as ICalendar
 from sqlalchemy.orm import Session
 
@@ -14,100 +15,125 @@ logger = logging.getLogger(__name__)
 
 BERLIN = zoneinfo.ZoneInfo("Europe/Berlin")
 
+# CalDAV XML namespaces
+NS_DAV = "DAV:"
+NS_CAL = "urn:ietf:params:xml:ns:caldav"
+NS = {"d": NS_DAV, "cal": NS_CAL}
+
+# PROPFIND body: request getetag for all calendar objects
+_PROPFIND_ETAG_BODY = """<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:">
+  <d:prop>
+    <d:getetag/>
+  </d:prop>
+</d:propfind>"""
+
+# MULTIGET body template: fill in <d:href> elements
+_MULTIGET_TMPL = """<?xml version="1.0" encoding="utf-8"?>
+<cal:calendar-multiget xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav">
+  <d:prop>
+    <d:getetag/>
+    <cal:calendar-data/>
+  </d:prop>
+  {hrefs}
+</cal:calendar-multiget>"""
+
 
 def _parse_dt(value) -> tuple[datetime | None, bool]:
-    """Return (datetime_naive_local, all_day).
-
-    Speichert naive Datetimes in Europe/Berlin-Lokalzeit, damit das Frontend
-    sie ohne Umrechnung anzeigen kann.
-
-    Nextcloud liefert:
-      - DTSTART mit TZID=Europe/Berlin → aware datetime → nach Berlin konvertieren
-      - DTSTART als naive datetime     → bereits Lokalzeit, tzinfo nur entfernen
-      - DATE (ganztägig)               → date-Objekt → datetime um Mitternacht
-    """
+    """Return (datetime_naive_local, all_day)."""
     if value is None:
         return None, False
-
     if isinstance(value, datetime):
         if value.tzinfo is None:
             return value.replace(tzinfo=None), False
         else:
             local = value.astimezone(BERLIN)
             return local.replace(tzinfo=None), False
-
     if isinstance(value, date):
         return datetime(value.year, value.month, value.day), True
-
     return None, False
 
 
-def _fetch_remote_etags(caldav_calendar) -> dict[str, str]:
-    """PROPFIND: liefert {obj_url: etag} für alle Events — ein einziger HTTP-Request."""
+def _propfind_etags(client, cal_url: str) -> dict[str, str]:
+    """
+    PROPFIND Depth:1 → {obj_url: etag} für alle Calendar Objects.
+    Ein einziger HTTP-Request.
+    """
+    resp = client.propfind(
+        url=cal_url,
+        props=_PROPFIND_ETAG_BODY,
+        depth=1,
+    )
     etags: dict[str, str] = {}
     try:
-        # load_objects=False → nur Metadaten (URL + ETag), kein iCal-Download
-        for obj in caldav_calendar.objects(load_objects=False):
-            obj_url = str(obj.url)
-            try:
-                props = obj.get_properties(["{DAV:}getetag"])
-                etag = props.get("{DAV:}getetag", "")
-            except Exception:
-                etag = ""
-            etags[obj_url] = etag
+        raw_xml = resp.raw if isinstance(resp.raw, bytes) else resp.raw.encode()
+        tree = etree.fromstring(raw_xml)
     except Exception as exc:
-        raise RuntimeError(f"PROPFIND failed: {exc}") from exc
+        logger.warning("Could not parse PROPFIND response for %s: %s", cal_url, exc)
+        return etags
+
+    base_url = str(client.url).rstrip("/")
+
+    for response in tree.findall("d:response", NS):
+        href = response.findtext("d:href", namespaces=NS) or ""
+        # Skip the calendar collection itself
+        cal_path = cal_url.replace(base_url, "").rstrip("/")
+        if href.rstrip("/") == cal_path:
+            continue
+        etag_el = response.find(".//d:getetag", NS)
+        etag = etag_el.text.strip('"') if etag_el is not None and etag_el.text else ""
+        if href:
+            # Normalize to full URL
+            if href.startswith("/"):
+                full_url = base_url + href
+            else:
+                full_url = href
+            etags[full_url] = etag
+
     return etags
 
 
-def _fetch_ical_data(caldav_calendar, urls: list[str]) -> dict[str, tuple[str, str]]:
-    """MULTIGET REPORT: holt iCal-Daten nur für die angegebenen URLs.
-
-    Gibt {obj_url: (etag, raw_ical)} zurück.
-    Fällt auf Einzel-GETs zurück wenn multiget nicht verfügbar ist.
+def _multiget_ical(client, cal_url: str, urls: list[str]) -> dict[str, tuple[str, str]]:
     """
-    result: dict[str, tuple[str, str]] = {}
+    CalDAV REPORT calendar-multiget → {obj_url: (etag, raw_ical)}.
+    Holt iCal-Daten für alle angegebenen URLs in einem einzigen HTTP-Request.
+    """
     if not urls:
-        return result
+        return {}
 
-    # Versuche MULTIGET (ein Request für alle URLs)
+    base_url = str(client.url).rstrip("/")
+
+    # Build <d:href> elements — use path-only hrefs as CalDAV servers prefer
+    hrefs_xml = "\n  ".join(
+        f"<d:href>{url.replace(base_url, '')}</d:href>"
+        for url in urls
+    )
+    body = _MULTIGET_TMPL.format(hrefs=hrefs_xml)
+
+    resp = client.report(url=cal_url, query=body, depth=1)
+
+    result: dict[str, tuple[str, str]] = {}
     try:
-        objects = caldav_calendar.multiget(urls)
-        for obj in objects:
-            obj_url = str(obj.url)
-            raw = str(obj.data) if obj.data else ""
-            if not raw:
-                continue
-            try:
-                props = obj.get_properties(["{DAV:}getetag"])
-                etag = props.get("{DAV:}getetag", "")
-            except Exception:
-                etag = ""
-            result[obj_url] = (etag, raw)
-        logger.debug("MULTIGET fetched %d objects in one request", len(result))
-        return result
-    except AttributeError:
-        # Ältere caldav-Lib-Version ohne multiget()
-        logger.warning("caldav.multiget() not available, falling back to individual GETs")
+        raw_xml = resp.raw if isinstance(resp.raw, bytes) else resp.raw.encode()
+        tree = etree.fromstring(raw_xml)
     except Exception as exc:
-        logger.warning("MULTIGET failed (%s), falling back to individual GETs", exc)
+        logger.error("Could not parse MULTIGET response for %s: %s", cal_url, exc)
+        return result
 
-    # Fallback: einzelne GETs
-    for url in urls:
-        try:
-            obj = caldav_calendar.object_by_url(url)
-            raw = str(obj.data) if obj.data else ""
-            if not raw:
-                continue
-            try:
-                props = obj.get_properties(["{DAV:}getetag"])
-                etag = props.get("{DAV:}getetag", "")
-            except Exception:
-                etag = ""
-            result[url] = (etag, raw)
-        except Exception as exc:
-            logger.warning("GET failed for %s: %s", url, exc)
+    for response in tree.findall("d:response", NS):
+        href = response.findtext("d:href", namespaces=NS) or ""
+        full_url = base_url + href if href.startswith("/") else href
 
+        etag_el = response.find(".//d:getetag", NS)
+        etag = etag_el.text.strip('"') if etag_el is not None and etag_el.text else ""
+
+        cal_data_el = response.find(".//cal:calendar-data", NS)
+        raw = cal_data_el.text if cal_data_el is not None and cal_data_el.text else ""
+
+        if raw:
+            result[full_url] = (etag, raw)
+
+    logger.debug("MULTIGET: requested %d, received %d", len(urls), len(result))
     return result
 
 
@@ -134,7 +160,6 @@ def _upsert_event(
     for component in ical.walk("VEVENT"):
         comp_uid = str(component.get("UID", obj_url))
         rid_prop = component.get("RECURRENCE-ID")
-
         if rid_prop is None:
             if master_component is None:
                 master_uid = comp_uid
@@ -150,7 +175,6 @@ def _upsert_event(
 
     existing = local_events.get(master_uid)
     if existing and existing.etag == remote_etag:
-        # ETag stimmt überein → Datei unverändert
         return
 
     summary = str(master_component.get("SUMMARY", "")) or None
@@ -191,7 +215,7 @@ def _upsert_event(
             description=description,
             raw_ical=raw,
         ))
-        db.flush()  # FK für EventOverride muss existieren
+        db.flush()
 
     db.query(EventOverride).filter(
         EventOverride.master_uid == master_uid
@@ -200,43 +224,36 @@ def _upsert_event(
     for ov_uid, rid_dt, ov_comp in override_components:
         if ov_uid != master_uid:
             continue
-
         rid_norm, _ = _parse_dt(rid_dt)
         if rid_norm is None:
             continue
-
         ov_start_raw = ov_comp.get("DTSTART")
         ov_start_val = ov_start_raw.dt if ov_start_raw else None
         ov_start_dt, _ = _parse_dt(ov_start_val)
-
         ov_end_raw = ov_comp.get("DTEND")
         ov_end_val = ov_end_raw.dt if ov_end_raw else None
         ov_end_dt, _ = _parse_dt(ov_end_val)
-
-        ov_summary = str(ov_comp.get("SUMMARY", "")) or None
-        ov_location = str(ov_comp.get("LOCATION", "")) or None
-        ov_description = str(ov_comp.get("DESCRIPTION", "")) or None
-
         db.add(EventOverride(
             master_uid=master_uid,
             recurrence_id=rid_norm,
             start=ov_start_dt,
             end=ov_end_dt,
-            summary=ov_summary,
-            location=ov_location,
-            description=ov_description,
+            summary=str(ov_comp.get("SUMMARY", "")) or None,
+            location=str(ov_comp.get("LOCATION", "")) or None,
+            description=str(ov_comp.get("DESCRIPTION", "")) or None,
         ))
 
 
 def _sync_calendar(db: Session, caldav_calendar) -> None:
     cal_url = str(caldav_calendar.url)
+    client = caldav_calendar.client
 
-    # ── 1. CTag prüfen (PROPFIND) ───────────────────────────────────────────
+    # ── 1. CTag prüfen ──────────────────────────────────────────────────────
     ctag = None
     try:
         from caldav.elements import dav
         props = caldav_calendar.get_properties([dav.GetCTag()])
-        ctag = str(props.get("{http://calendarserver.org/ns/}getctag", ""))
+        ctag = str(props.get("{http://calendarserver.org/ns/}getctag", "")) or None
     except Exception:
         pass
 
@@ -249,7 +266,6 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
             color = props.get("{http://apple.com/ns/ical/}calendar-color")
         except Exception:
             pass
-
         db_cal = Calendar(
             id=cal_url,
             name=caldav_calendar.name or "Unnamed",
@@ -266,66 +282,58 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
 
     logger.info("Syncing calendar: %s", db_cal.name)
 
-    # ── 2. Alle ETags holen (PROPFIND, load_objects=False) — 1 Request ──────
+    # ── 2. Alle ETags via PROPFIND — 1 Request ───────────────────────────────
     try:
-        remote_etags: dict[str, str] = _fetch_remote_etags(caldav_calendar)
+        remote_etags = _propfind_etags(client, cal_url)
     except Exception as exc:
-        logger.error("Failed to fetch ETags for %s: %s", cal_url, exc)
+        logger.error("PROPFIND failed for %s: %s", cal_url, exc)
         return
 
-    logger.debug("Remote: %d objects", len(remote_etags))
+    logger.info("Calendar %s: %d remote objects", db_cal.name, len(remote_etags))
 
-    # ── 3. Mit DB vergleichen ────────────────────────────────────────────────
+    # ── 3. Mit DB vergleichen ─────────────────────────────────────────────────
     local_events: dict[str, Event] = {
         e.uid: e for e in db.query(Event).filter(Event.calendar_id == cal_url).all()
     }
-    # url → etag der lokalen Events (wir haben keine URL als PK, aber etag reicht zum Vergleich)
-    # Da URL nicht in der DB steht, holen wir für alle remote URLs deren ETag
-    # und prüfen ob wir ein lokales Event mit gleichem ETag haben.
-    # Strategie: URLs ohne bekanntes lokales ETag-Match → MULTIGET
-    local_etags_set: set[str] = {e.etag for e in local_events.values() if e.etag}
+    local_etag_to_uid: dict[str, str] = {
+        e.etag: e.uid for e in local_events.values() if e.etag
+    }
 
     urls_to_fetch: list[str] = []
-    remote_urls_set: set[str] = set(remote_etags.keys())
+    unchanged_etags: set[str] = set()
 
     for url, remote_etag in remote_etags.items():
-        if remote_etag not in local_etags_set:
-            # Entweder neu oder geändert → muss geholt werden
+        if remote_etag and remote_etag in local_etag_to_uid:
+            unchanged_etags.add(remote_etag)
+        else:
             urls_to_fetch.append(url)
 
-    deleted_count = 0
-    changed_count = len(urls_to_fetch)
     logger.info(
-        "Calendar %s: %d remote, %d to fetch",
-        db_cal.name, len(remote_etags), changed_count,
+        "Calendar %s: %d unchanged, %d to fetch",
+        db_cal.name, len(unchanged_etags), len(urls_to_fetch),
     )
 
-    # ── 4. MULTIGET — nur neue/geänderte URLs ────────────────────────────────
+    # ── 4. MULTIGET — nur neue/geänderte URLs, 1 Request ─────────────────────
     seen_uids: set[str] = set()
 
     if urls_to_fetch:
         try:
-            fetched = _fetch_ical_data(caldav_calendar, urls_to_fetch)
+            fetched = _multiget_ical(client, cal_url, urls_to_fetch)
         except Exception as exc:
-            logger.error("Failed to fetch iCal data for %s: %s", cal_url, exc)
+            logger.error("MULTIGET failed for %s: %s", cal_url, exc)
             return
 
         for obj_url, (remote_etag, raw) in fetched.items():
             _upsert_event(db, cal_url, remote_etag, raw, obj_url, local_events, seen_uids)
 
-    # Für Events deren ETag unverändert ist, müssen wir trotzdem seen_uids befüllen,
-    # damit sie nicht fälschlicherweise als gelöscht markiert werden.
-    # Da wir keine URL→UID-Zuordnung in der DB haben, identifizieren wir
-    # unveränderte Events über ETag-Übereinstimmung.
-    unchanged_etags: set[str] = {
-        etag for url, etag in remote_etags.items()
-        if url not in urls_to_fetch
-    }
-    for event in local_events.values():
-        if event.etag in unchanged_etags:
-            seen_uids.add(event.uid)
+    # Unveränderte Events als "gesehen" markieren (nicht löschen!)
+    for etag in unchanged_etags:
+        uid = local_etag_to_uid.get(etag)
+        if uid:
+            seen_uids.add(uid)
 
-    # ── 5. Gelöschte Events entfernen ────────────────────────────────────────
+    # ── 5. Gelöschte Events entfernen ─────────────────────────────────────────
+    deleted_count = 0
     for uid, event in local_events.items():
         if uid not in seen_uids:
             logger.info("Deleting removed event: %s", uid)
@@ -335,13 +343,13 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
             db.delete(event)
             deleted_count += 1
 
-    # ── 6. CTag aktualisieren ────────────────────────────────────────────────
+    # ── 6. CTag aktualisieren ─────────────────────────────────────────────────
     db_cal.ctag = ctag
     db_cal.last_synced_at = datetime.now(timezone.utc)
     db.commit()
     logger.info(
         "Sync complete for %s: %d fetched, %d deleted",
-        db_cal.name, changed_count, deleted_count,
+        db_cal.name, len(urls_to_fetch), deleted_count,
     )
 
 
