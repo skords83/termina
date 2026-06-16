@@ -462,13 +462,17 @@ export default function App() {
       });
 
       // Backend hat geschrieben + run_sync als BackgroundTask gestartet.
-      // Etwas warten, damit der Sync die DB aktualisiert hat, dann refetchen.
+      // Kurz warten, damit der Sync die DB aktualisiert hat, dann refetchen.
+      // Der optimistische Override wird von useMergedEvents automatisch
+      // aufgeräumt, sobald der Server das neue ETag liefert.
       setTimeout(() => {
-        optimistic.clearAll();
         setRefreshNonce((n) => n + 1);
       }, 1000);
     } catch (err: any) {
-      optimistic.clearAll();
+      // Nur den fehlgeschlagenen Override zurücknehmen, nicht alles wegwerfen.
+      if (!ev.is_recurring) {
+        optimistic.rollbackUpdate(ev.uid);
+      }
       if (err?.type === 'conflict') {
         alert('Konflikt: Termin wurde extern geändert. Bitte neu laden.');
       } else if (err?.type === 'nextcloud_down') {
@@ -630,7 +634,7 @@ export default function App() {
             onEdit={(ev) => { setSelectedEvent(null); setEditModal(ev); }}
             onDeleted={(uid) => {
               optimistic.deleteOptimistic(uid);
-              setTimeout(() => optimistic.clearAll(), 6000);
+              setRefreshNonce((n) => n + 1);
             }}
           />
         )}
@@ -642,10 +646,9 @@ export default function App() {
             defaultDate={createModal.defaultDate}
             onClose={() => setCreateModal(null)}
             onSaved={(_uid, ev) => {
-            optimistic.addOptimistic(ev);
-            setRefreshNonce((n) => n + 1);           // ← sofort refetchen
-            setTimeout(() => optimistic.clearAll(), 10000);
-          }}
+              optimistic.addOptimistic(ev);
+              setRefreshNonce((n) => n + 1);
+            }}
           />
         )}
 
@@ -657,7 +660,7 @@ export default function App() {
             onClose={() => setEditModal(null)}
             onSaved={(_uid, ev) => {
               optimistic.updateOptimistic(ev);
-              setTimeout(() => optimistic.clearAll(), 6000);
+              setRefreshNonce((n) => n + 1);
             }}
           />
         )}
@@ -698,8 +701,7 @@ export default function App() {
                 etag: null,
                 description: null,
               });
-              setRefreshNonce((n) => n + 1);            // ← gleiche Lösung
-              setTimeout(() => optimistic.clearAll(), 10000);
+              setRefreshNonce((n) => n + 1);
             }}
             onClose={() => setShowNatural(false)}
           />

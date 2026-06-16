@@ -1,31 +1,27 @@
 // frontend/src/store/eventsSlice.ts
 //
-// Erweiterung des Zustand-Stores für Optimistic UI.
+// Optimistic-UI-Store für Termina.
 //
-// INTEGRATION: Diese Logik in den bestehenden Store (`store/index.ts`) einbauen.
-// Statt den gesamten Store zu ersetzen, werden hier die neuen State-Teile
-// und Actions beschrieben, die hinzugefügt werden müssen.
+// `useOptimisticStore` hält drei Arten von Overrides über die Server-Daten:
+//   - `added`:   Events, die lokal angelegt wurden, aber noch nicht vom Server kommen
+//   - `deleted`: UIDs, die lokal gelöscht wurden
+//   - `updated`: Events, die lokal geändert wurden (Map uid → updated event)
 //
-// Voraussetzung: Der Store hat bereits `events: CalendarEvent[]` oder nutzt
-// aktuell `useEvents`-Hook mit lokalem State. Falls Events bisher NUR im
-// Hook-State leben, sollte man sie in den Store heben – oder den unten
-// gezeigten `useOptimisticEvents`-Hook verwenden, der neben dem Hook-State läuft.
+// `useMergedEvents(serverEvents)` merged Server-Daten mit den Overrides UND
+// räumt die Overrides selbständig auf, sobald der Server konsistent ist
+// (Event taucht auf bzw. ist weg bzw. hat ein neueres ETag).
+//
+// → Es gibt KEINEN Blind-Timer mehr, der irgendwann `clearAll()` aufruft.
+//   Genau das war die Ursache dafür, dass neue Termine nach ein paar Sekunden
+//   verschwanden, wenn der Refetch noch nicht durch war.
 
+import { useEffect } from 'react';
 import { create } from 'zustand';
 import type { CalendarEvent } from '../types';
 
-// ── Option A: Separater Optimistic-Slice ─────────────────────────────────────
-//
-// Dieser Store verwaltet AUSSCHLIESSLICH optimistische Overrides.
-// Der bestehende useEvents-Hook bleibt unverändert.
-// Im CalendarView wird die Merge-Logik angewendet (siehe useOptimisticEvents).
-
 interface OptimisticState {
-  // Events die lokal hinzugefügt wurden (CREATE) aber noch nicht vom Server kommen
   added: CalendarEvent[];
-  // UIDs die lokal gelöscht wurden
   deleted: Set<string>;
-  // Events die lokal bearbeitet wurden (Map uid → updated event)
   updated: Map<string, CalendarEvent>;
 
   addOptimistic: (event: CalendarEvent) => void;
@@ -76,24 +72,58 @@ export const useOptimisticStore = create<OptimisticState>((set) => ({
     set({ added: [], deleted: new Set(), updated: new Map() }),
 }));
 
-// ── Hook: Optimistic-Events mit Server-Events mergen ─────────────────────────
+// ── Hook: Server-Events mit Optimistic-Overrides mergen ──────────────────────
 //
-// Verwendung in CalendarView / MonthView:
-//
-//   const serverEvents = useEvents(from, to);
+// Verwendung:
+//   const serverEvents = useEvents(token, from, to, refreshNonce);
 //   const events = useMergedEvents(serverEvents);
 //
-// Nach einem Refresh (useEvents lädt neu) werden die optimistischen Overrides
-// automatisch irrelevant, weil die Server-Daten aktuell sind. clearAll() kann
-// nach einem erfolgreichen Refresh aufgerufen werden.
+// Sobald `serverEvents` einen optimistischen Eintrag bestätigt (oder das
+// Gegenteil), räumt der Hook den Override selbst auf.
 
 export function useMergedEvents(serverEvents: CalendarEvent[]): CalendarEvent[] {
-  const { added, deleted, updated } = useOptimisticStore();
+  // Einzelselektoren → minimale Rerenders
+  const added = useOptimisticStore((s) => s.added);
+  const deleted = useOptimisticStore((s) => s.deleted);
+  const updated = useOptimisticStore((s) => s.updated);
+  const rollbackAdd = useOptimisticStore((s) => s.rollbackAdd);
+  const rollbackDelete = useOptimisticStore((s) => s.rollbackDelete);
+  const rollbackUpdate = useOptimisticStore((s) => s.rollbackUpdate);
+
+  useEffect(() => {
+    // CREATE: Server hat unser optimistisches Event jetzt → Override entfernen.
+    //   Das Event kommt jetzt aus serverEvents, kein Flackern.
+    added.forEach((e) => {
+      if (serverEvents.some((s) => s.uid === e.uid)) {
+        rollbackAdd(e.uid);
+      }
+    });
+
+    // DELETE: Server liefert das gelöschte Event nicht mehr → Override weg.
+    deleted.forEach((uid) => {
+      if (!serverEvents.some((s) => s.uid === uid)) {
+        rollbackDelete(uid);
+      }
+    });
+
+    // UPDATE: Server hat ein neueres ETag → unser Override ist obsolet.
+    //   `localEv.etag` ist das *alte* ETag (vor dem Edit). Sobald der Server
+    //   ein anderes, nicht-leeres ETag liefert, ist die Server-Version aktuell.
+    //   Solange der Server noch das alte ETag oder etag=null liefert
+    //   (Background-Sync noch nicht durch), bleibt der lokale Override aktiv.
+    updated.forEach((localEv, uid) => {
+      const serverEv = serverEvents.find((s) => s.uid === uid);
+      if (serverEv && serverEv.etag && serverEv.etag !== localEv.etag) {
+        rollbackUpdate(uid);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverEvents]);
 
   return [
-    // Optimistisch hinzugefügte Events (die noch nicht vom Server kommen)
+    // Optimistisch hinzugefügte Events, die noch nicht vom Server kommen
     ...added.filter((e) => !serverEvents.some((s) => s.uid === e.uid)),
-    // Server-Events, gefiltert und mit Updates gemergt
+    // Server-Events, gefiltert (DELETE) und gemergt (UPDATE)
     ...serverEvents
       .filter((e) => !deleted.has(e.uid))
       .map((e) => updated.get(e.uid) ?? e),
