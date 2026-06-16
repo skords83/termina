@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   DndContext,
   DragEndEvent,
@@ -121,6 +121,12 @@ export default function App() {
 
   // Refetch-Trigger: bumpen nach erfolgreichen Schreib-Operationen
   const [refreshNonce, setRefreshNonce] = useState(0);
+
+  // Refs für Keyboard-Handler (stabile Referenz ohne Re-Register)
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const currentDateRef = useRef(currentDate);
+  currentDateRef.current = currentDate;
 
   const [currentDate, setCurrentDate] = useState<Date>(() => {
     const d = new Date();
@@ -265,15 +271,72 @@ export default function App() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const inInput = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+      const anyModalOpen = !!document.querySelector('.natural-overlay, .event-form-overlay, .search-overlay, .event-popup, .recurring-move-overlay');
+
+      // ⌘K → Suche (funktioniert auch aus Inputs)
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setShowSearch(true);
+        return;
       }
+      // ⌘N → Natural Input (funktioniert auch aus Inputs)
       if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
         e.preventDefault();
         setShowNatural(true);
+        return;
       }
+
+      // Ab hier: nur wenn kein Input fokussiert
+      if (inInput) return;
+
+      // Ab hier: nur wenn kein Modal offen
+      if (anyModalOpen) return;
+
+      // Leertaste → NaturalInputBar
+      if (e.key === ' ' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        setShowNatural(true);
+        return;
+      }
+
+      // n → neues Event (EventFormModal, Datum = aktuell selektierter Tag)
+      if (e.key === 'n') {
+        const d = currentDateRef.current;
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        setCreateModal({ defaultDate: dateStr });
+        return;
+      }
+
+      // t → Heute
+      if (e.key === 't') {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        setCurrentDate(d);
+        return;
+      }
+
+      // ← / → → Navigation (Monat/Woche/Tag/Agenda)
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const dir = e.key === 'ArrowLeft' ? -1 : 1;
+        setCurrentDate((prev) => {
+          const d = new Date(prev);
+          const v = viewRef.current;
+          if (v === 'month') d.setMonth(d.getMonth() + dir);
+          else if (v === 'week') d.setDate(d.getDate() + 7 * dir);
+          else if (v === 'day') d.setDate(d.getDate() + dir);
+          else if (v === 'agenda') d.setDate(d.getDate() + 30 * dir);
+          return d;
+        });
+        return;
+      }
+
+      // 1/2/3/4 → View wechseln
+      if (e.key === '1') { setView('month'); return; }
+      if (e.key === '2') { setView('week'); return; }
+      if (e.key === '3') { setView('day'); return; }
+      if (e.key === '4') { setView('agenda'); return; }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -473,7 +536,7 @@ export default function App() {
               </svg>
             </button>
             {/* Fließtext-Eingabe */}
-            <button className="toolbar-btn" onClick={() => setShowNatural(true)} title="Termin in Fließtext eingeben (⌘N)">
+            <button className="toolbar-btn" onClick={() => setShowNatural(true)} title="Termin in Fließtext eingeben (Leertaste)">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M2 12.5V10l7.5-7.5 2.5 2.5L4.5 12.5H2Z" />
                 <line x1="9" y1="4" x2="12" y2="7" />

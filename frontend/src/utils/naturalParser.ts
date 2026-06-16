@@ -300,12 +300,17 @@ function isAllDay(input: string): boolean {
 
 // ─── Zusammenfassung aus Rest-Text extrahieren ────────────────────────────────
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function extractSummary(input: string, consumed: string[]): string {
   let text = input;
 
-  // Remove consumed tokens
+  // Remove consumed tokens (case-insensitive)
   for (const c of consumed) {
-    text = text.replace(c, " ");
+    if (!c) continue;
+    text = text.replace(new RegExp(escapeRegExp(c), "gi"), " ");
   }
 
   // Remove common filler words
