@@ -122,17 +122,17 @@ export default function App() {
   // Refetch-Trigger: bumpen nach erfolgreichen Schreib-Operationen
   const [refreshNonce, setRefreshNonce] = useState(0);
 
-  // Refs für Keyboard-Handler (stabile Referenz ohne Re-Register)
-  const viewRef = useRef(view);
-  viewRef.current = view;
-  const currentDateRef = useRef(currentDate);
-  currentDateRef.current = currentDate;
-
   const [currentDate, setCurrentDate] = useState<Date>(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
     return d;
   });
+
+  // Refs für Keyboard-Handler (stabile Referenz ohne Re-Register)
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const currentDateRef = useRef(currentDate);
+  currentDateRef.current = currentDate;
 
   useEffect(() => {
     const str = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-01`;
