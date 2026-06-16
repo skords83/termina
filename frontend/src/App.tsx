@@ -642,9 +642,10 @@ export default function App() {
             defaultDate={createModal.defaultDate}
             onClose={() => setCreateModal(null)}
             onSaved={(_uid, ev) => {
-              optimistic.addOptimistic(ev);
-              setTimeout(() => optimistic.clearAll(), 6000);
-            }}
+            optimistic.addOptimistic(ev);
+            setRefreshNonce((n) => n + 1);           // ← sofort refetchen
+            setTimeout(() => optimistic.clearAll(), 10000);
+          }}
           />
         )}
 
@@ -697,7 +698,8 @@ export default function App() {
                 etag: null,
                 description: null,
               });
-              setTimeout(() => optimistic.clearAll(), 6000);
+              setRefreshNonce((n) => n + 1);            // ← gleiche Lösung
+              setTimeout(() => optimistic.clearAll(), 10000);
             }}
             onClose={() => setShowNatural(false)}
           />
