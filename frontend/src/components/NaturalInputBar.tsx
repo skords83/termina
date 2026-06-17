@@ -35,8 +35,9 @@ function NaturalInputBar({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
   const inputRef = useRef<HTMLInputElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -45,28 +46,38 @@ function NaturalInputBar({
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (dropdownOpen) {
-          setDropdownOpen(false);
-        } else {
-          onClose();
-        }
+        if (dropdownOpen) setDropdownOpen(false);
+        else onClose();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose, dropdownOpen]);
 
-  // Close dropdown when clicking outside
+  // Close on outside click
   useEffect(() => {
     if (!dropdownOpen) return;
     const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (triggerRef.current && !triggerRef.current.closest(".natural-cal-picker")?.contains(e.target as Node)) {
         setDropdownOpen(false);
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [dropdownOpen]);
+
+  const openDropdown = () => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    setMenuStyle({
+      position: "fixed",
+      top: rect.bottom + 4,
+      left: rect.left,
+      width: rect.width,
+      zIndex: 9999,
+    });
+    setDropdownOpen(true);
+  };
 
   const parsed = text.trim() ? parseNaturalEvent(text) : null;
 
@@ -114,21 +125,15 @@ function NaturalInputBar({
           />
         </div>
 
-        {/* Live preview */}
         {parsed ? (
           <div className="natural-preview">
             <div className="natural-preview-title">
-              <span
-                className="natural-preview-dot"
-                style={{ background: cal?.color || "#888" }}
-              />
+              <span className="natural-preview-dot" style={{ background: cal?.color || "#888" }} />
               {parsed.summary}
             </div>
             <div className="natural-preview-meta">
               <span>{formatPreviewDate(parsed.start)}</span>
-              {!parsed.all_day && (
-                <span> – {formatPreviewDate(parsed.end)}</span>
-              )}
+              {!parsed.all_day && <span> – {formatPreviewDate(parsed.end)}</span>}
               {parsed.all_day && <span> (Ganztägig)</span>}
               {parsed.location && <span> · 📍 {parsed.location}</span>}
             </div>
@@ -152,41 +157,29 @@ function NaturalInputBar({
           <div className="natural-cal-select">
             <label className="natural-cal-label">Kalender:</label>
 
-            {/* Custom dropdown – öffnet nach oben */}
-            <div
-              ref={dropdownRef}
-              className="natural-cal-picker"
-            >
+            <div className="natural-cal-picker">
               <button
+                ref={triggerRef}
                 type="button"
                 className="natural-cal-trigger"
-                onClick={() => setDropdownOpen((v) => !v)}
+                onClick={openDropdown}
                 disabled={saving}
               >
-                <span
-                  className="natural-cal-trigger-dot"
-                  style={{ background: cal?.color || "#888" }}
-                />
+                <span className="natural-cal-trigger-dot" style={{ background: cal?.color || "#888" }} />
                 <span className="natural-cal-trigger-name">{cal?.name ?? "–"}</span>
                 <span className="natural-cal-trigger-arrow">{dropdownOpen ? "▴" : "▾"}</span>
               </button>
 
               {dropdownOpen && (
-                <div className="natural-cal-menu">
+                <div className="natural-cal-menu" style={menuStyle}>
                   {calendars.map((c) => (
                     <button
                       key={c.id}
                       type="button"
                       className={`natural-cal-option${c.id === calendarId ? " natural-cal-option--active" : ""}`}
-                      onClick={() => {
-                        setCalendarId(c.id);
-                        setDropdownOpen(false);
-                      }}
+                      onClick={() => { setCalendarId(c.id); setDropdownOpen(false); }}
                     >
-                      <span
-                        className="natural-cal-option-dot"
-                        style={{ background: c.color || "#888" }}
-                      />
+                      <span className="natural-cal-option-dot" style={{ background: c.color || "#888" }} />
                       {c.name}
                     </button>
                   ))}
