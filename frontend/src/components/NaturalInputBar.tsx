@@ -34,7 +34,9 @@ function NaturalInputBar({
   const [calendarId, setCalendarId] = useState(defaultCalendarId || calendars[0]?.id || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -42,11 +44,29 @@ function NaturalInputBar({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (dropdownOpen) {
+          setDropdownOpen(false);
+        } else {
+          onClose();
+        }
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [onClose, dropdownOpen]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [dropdownOpen]);
 
   const parsed = text.trim() ? parseNaturalEvent(text) : null;
 
@@ -131,18 +151,48 @@ function NaturalInputBar({
         <div className="natural-footer">
           <div className="natural-cal-select">
             <label className="natural-cal-label">Kalender:</label>
-            <select
-              className="natural-cal-dropdown"
-              value={calendarId}
-              onChange={(e) => setCalendarId(e.target.value)}
-              disabled={saving}
+
+            {/* Custom dropdown – öffnet nach oben */}
+            <div
+              ref={dropdownRef}
+              className="natural-cal-picker"
             >
-              {calendars.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              <button
+                type="button"
+                className="natural-cal-trigger"
+                onClick={() => setDropdownOpen((v) => !v)}
+                disabled={saving}
+              >
+                <span
+                  className="natural-cal-trigger-dot"
+                  style={{ background: cal?.color || "#888" }}
+                />
+                <span className="natural-cal-trigger-name">{cal?.name ?? "–"}</span>
+                <span className="natural-cal-trigger-arrow">{dropdownOpen ? "▴" : "▾"}</span>
+              </button>
+
+              {dropdownOpen && (
+                <div className="natural-cal-menu">
+                  {calendars.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={`natural-cal-option${c.id === calendarId ? " natural-cal-option--active" : ""}`}
+                      onClick={() => {
+                        setCalendarId(c.id);
+                        setDropdownOpen(false);
+                      }}
+                    >
+                      <span
+                        className="natural-cal-option-dot"
+                        style={{ background: c.color || "#888" }}
+                      />
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="natural-actions">
