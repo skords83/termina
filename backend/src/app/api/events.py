@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as date_cls
 from typing import Optional, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -25,11 +25,18 @@ router = APIRouter()
 
 # ── Pydantic-Schemas ──────────────────────────────────────────────────────────
 
+def _to_dt(v: datetime | date_cls) -> datetime:
+    """Normalisiert date → datetime(midnight). datetime bleibt unverändert."""
+    if isinstance(v, datetime):
+        return v
+    return datetime(v.year, v.month, v.day, 0, 0, 0)
+
+
 class EventCreate(BaseModel):
     calendar_id: str
     summary: str
-    start: datetime
-    end: datetime
+    start: datetime | date_cls
+    end: datetime | date_cls
     all_day: bool = False
     location: str | None = None
     description: str | None = None
@@ -39,8 +46,8 @@ class EventCreate(BaseModel):
 class EventUpdate(BaseModel):
     etag: str
     summary: str
-    start: datetime
-    end: datetime
+    start: datetime | date_cls
+    end: datetime | date_cls
     all_day: bool = False
     location: str | None = None
     description: str | None = None
@@ -244,8 +251,8 @@ def post_event(
         uid = create_event(
             calendar_id=body.calendar_id,
             summary=body.summary,
-            start=body.start,
-            end=body.end,
+            start=_to_dt(body.start),
+            end=_to_dt(body.end),
             all_day=body.all_day,
             location=body.location,
             description=body.description,
@@ -274,11 +281,12 @@ def put_event(
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
 
+    start_dt = _to_dt(body.start)
+    end_dt = _to_dt(body.end)
+
     rid_naive = body.recurrence_id.replace(tzinfo=None) if body.recurrence_id else None
 
     # ── Scope: Nur diese Instanz ──────────────────────────────────────────────
-    # Wenn recurrence_id mitgegeben → nur diese Instanz als Override speichern,
-    # Master-Event und seine RRULE bleiben unverändert.
     if rid_naive is not None:
         existing_ov = (
             db.query(EventOverride)
@@ -288,8 +296,8 @@ def put_event(
             )
             .first()
         )
-        start_naive = body.start.replace(tzinfo=None)
-        end_naive = body.end.replace(tzinfo=None)
+        start_naive = start_dt.replace(tzinfo=None)
+        end_naive = end_dt.replace(tzinfo=None)
 
         if existing_ov is not None:
             existing_ov.summary = body.summary
@@ -309,19 +317,18 @@ def put_event(
             ))
         db.commit()
 
-        # Auch in Nextcloud schreiben (Override-VEVENT via PUT)
         try:
             update_event(
                 calendar_id=event.calendar_id,
                 uid=uid,
                 etag=body.etag,
                 summary=body.summary,
-                start=body.start,
-                end=body.end,
+                start=start_dt,
+                end=end_dt,
                 all_day=body.all_day,
                 location=body.location,
                 description=body.description,
-                rrule=event.rrule,  # Master-RRULE bleibt erhalten
+                rrule=event.rrule,
                 recurrence_id=body.recurrence_id,
             )
         except ConflictError:
@@ -341,8 +348,8 @@ def put_event(
             uid=uid,
             etag=body.etag,
             summary=body.summary,
-            start=body.start,
-            end=body.end,
+            start=start_dt,
+            end=end_dt,
             all_day=body.all_day,
             location=body.location,
             description=body.description,
