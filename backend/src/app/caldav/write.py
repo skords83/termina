@@ -119,7 +119,6 @@ def _parse_rrule_string(rrule_str: str | None) -> vRecur | None:
     """Parst einen RRULE-String (z.B. 'FREQ=WEEKLY;UNTIL=20261231T235959Z') in vRecur."""
     if not rrule_str:
         return None
-    # Manche Strings beginnen mit "RRULE:" — abtrennen
     s = rrule_str.strip()
     if s.upper().startswith("RRULE:"):
         s = s[6:]
@@ -128,6 +127,27 @@ def _parse_rrule_string(rrule_str: str | None) -> vRecur | None:
     except Exception as e:
         logger.warning("Konnte RRULE-String nicht parsen: %r (%s)", rrule_str, e)
         return None
+
+
+def _to_date(x) -> date_cls:
+    """Akzeptiert datetime oder date und gibt date zurück."""
+    if isinstance(x, datetime):
+        return x.date()
+    return x
+
+
+def _normalize_all_day(start, end) -> tuple[date_cls, date_cls]:
+    """
+    iCal-Konvention: DTEND ist bei all-day Events EXCLUSIVE.
+    Ein eintägiges Event am 19.9. muss DTSTART=20260919, DTEND=20260920 haben.
+    Frontend schickt manchmal end == start — hier korrigieren, sonst hat das Event
+    in der DB Länge 0 und wird im Range-Filter / Rendering nicht sichtbar.
+    """
+    s = _to_date(start)
+    e = _to_date(end)
+    if e <= s:
+        e = s + timedelta(days=1)
+    return s, e
 
 
 def _make_ical(
@@ -150,8 +170,9 @@ def _make_ical(
     ev.add("dtstamp", datetime.now(timezone.utc))
 
     if all_day:
-        ev.add("dtstart", start.date() if isinstance(start, datetime) else start)
-        ev.add("dtend", end.date() if isinstance(end, datetime) else end)
+        s_date, e_date = _normalize_all_day(start, end)
+        ev.add("dtstart", s_date)
+        ev.add("dtend", e_date)
     else:
         s = start.replace(tzinfo=None) if isinstance(start, datetime) and start.tzinfo else start
         e = end.replace(tzinfo=None) if isinstance(end, datetime) and end.tzinfo else end
@@ -265,9 +286,10 @@ def update_event(
 
             if all_day:
                 rid_val = recurrence_id.date() if isinstance(recurrence_id, datetime) else recurrence_id
+                s_date, e_date = _normalize_all_day(start, end)
                 override.add("RECURRENCE-ID", rid_val)
-                override.add("DTSTART", start.date() if isinstance(start, datetime) else start)
-                override.add("DTEND", end.date() if isinstance(end, datetime) else end)
+                override.add("DTSTART", s_date)
+                override.add("DTEND", e_date)
             else:
                 rid_naive = recurrence_id.replace(tzinfo=None) if recurrence_id.tzinfo else recurrence_id
                 s = start.replace(tzinfo=None) if isinstance(start, datetime) and start.tzinfo else start
@@ -467,9 +489,10 @@ def _apply_move_single(
 
     if all_day:
         rid_val = recurrence_id.date() if isinstance(recurrence_id, datetime) else recurrence_id
+        s_date, e_date = _normalize_all_day(new_start, new_end)
         override.add("RECURRENCE-ID", rid_val)
-        override.add("DTSTART", new_start.date() if isinstance(new_start, datetime) else new_start)
-        override.add("DTEND", new_end.date() if isinstance(new_end, datetime) else new_end)
+        override.add("DTSTART", s_date)
+        override.add("DTEND", e_date)
     else:
         override.add("RECURRENCE-ID", recurrence_id)
         override.add("DTSTART", new_start)
@@ -557,8 +580,9 @@ def _apply_move_future(
         new_ev.add("description", master["DESCRIPTION"])
 
     if all_day:
-        new_ev.add("dtstart", new_start.date() if isinstance(new_start, datetime) else new_start)
-        new_ev.add("dtend", new_end.date() if isinstance(new_end, datetime) else new_end)
+        s_date, e_date = _normalize_all_day(new_start, new_end)
+        new_ev.add("dtstart", s_date)
+        new_ev.add("dtend", e_date)
     else:
         ns = new_start.replace(tzinfo=None) if new_start.tzinfo else new_start
         ne = new_end.replace(tzinfo=None) if new_end.tzinfo else new_end
@@ -572,5 +596,4 @@ def _apply_move_future(
     caldav_cal.save_event(new_cal.to_ical())
 
     logger.info("move_event[future] created new event uid=%s", new_uid)
-
     return new_uid
