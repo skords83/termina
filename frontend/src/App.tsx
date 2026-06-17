@@ -20,6 +20,7 @@ import { EventPopup } from './components/EventPopup';
 import { EventFormModal } from './components/EventFormModal';
 import { RecurringMoveDialog } from './components/RecurringMoveDialog';
 import { useOptimisticStore, useMergedEvents } from './store/eventsSlice';
+import { useWindowFocusGuard } from './hooks/useWindowFocusGuard';
 import { CalendarEvent, MoveMode } from './types';
 import WeekView from './components/WeekView';
 import DayView from './components/DayView';
@@ -140,8 +141,10 @@ export default function App() {
   }, [currentDate]);
 
   const optimistic = useOptimisticStore();
+  const isFocusClick = useWindowFocusGuard();
 
   function handleEventClick(ev: CalendarEvent, rectOrMouse: DOMRect | React.MouseEvent) {
+    if (isFocusClick()) return;
     let x: number, y: number;
     if (rectOrMouse instanceof DOMRect) {
       x = rectOrMouse.left + rectOrMouse.width / 2;
@@ -585,7 +588,7 @@ export default function App() {
                 calendars={visibleCalendars}
                 visibleCalendarIds={visibleCalendarIds}
                 onEventClick={handleEventClickMouse}
-                onDayClick={(dateStr) => setCreateModal({ defaultDate: dateStr })}
+                onDayClick={(dateStr) => { if (!isFocusClick()) setCreateModal({ defaultDate: dateStr }); }}
                 onMoreClick={(dateStr) => {
                   setCurrentDate(new Date(dateStr + 'T00:00:00'));
                   setView('day');
@@ -599,6 +602,7 @@ export default function App() {
                 calendars={visibleCalendars}
                 onEventClick={(ev, rect) => handleEventClick(ev, rect)}
                 onDayClick={(date) => {
+                  if (isFocusClick()) return;
                   setCurrentDate(date);
                   setView('day');
                 }}
@@ -610,7 +614,7 @@ export default function App() {
                 events={visibleEvents}
                 calendars={visibleCalendars}
                 onEventClick={(ev, rect) => handleEventClick(ev, rect)}
-                onDayClick={(date) => setCreateModal({ defaultDate: toDateStr(date) })}
+                onDayClick={(date) => { if (!isFocusClick()) setCreateModal({ defaultDate: toDateStr(date) }); }}
               />
             )}
             {view === 'agenda' && (
