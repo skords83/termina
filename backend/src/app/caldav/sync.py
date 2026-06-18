@@ -181,6 +181,27 @@ def _parse_dt(value) -> tuple[datetime | None, bool]:
     return None, False
 
 
+def _infer_all_day(
+    start_dt: datetime | None, end_dt: datetime | None, all_day: bool
+) -> bool:
+    """Detect midnight-to-midnight events as all-day (some ICS sources use T000000)."""
+    if all_day:
+        return True
+    if start_dt is None or end_dt is None:
+        return False
+    if (
+        start_dt.hour == 0
+        and start_dt.minute == 0
+        and start_dt.second == 0
+        and end_dt.hour == 0
+        and end_dt.minute == 0
+        and end_dt.second == 0
+        and end_dt > start_dt
+    ):
+        return True
+    return False
+
+
 def _host_url(client) -> str:
     """Nur Schema + Host, ohne Pfad. Für href-Rekonstruktion aus DAV-Responses."""
     from urllib.parse import urlparse
@@ -321,6 +342,7 @@ def _upsert_event(
     end_raw = master_component.get("DTEND") or master_component.get("DURATION")
     end_val = end_raw.dt if end_raw else None
     end_dt, _ = _parse_dt(end_val)
+    all_day = _infer_all_day(start_dt, end_dt, all_day)
 
     if existing:
         existing.etag = remote_etag
@@ -476,6 +498,7 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
         end_raw = component.get("DTEND") or component.get("DURATION")
         end_val = end_raw.dt if end_raw else None
         end_dt, _ = _parse_dt(end_val)
+        all_day = _infer_all_day(start_dt, end_dt, all_day)
 
         existing = local_events.get(uid)
         if existing:
