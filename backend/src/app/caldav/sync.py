@@ -162,6 +162,14 @@ def _parse_dt(value) -> tuple[datetime | None, bool]:
     return None, False
 
 
+def _host_url(client) -> str:
+    """Nur Schema + Host, ohne Pfad. Für href-Rekonstruktion aus DAV-Responses."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(str(client.url))
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 def _propfind_etags(client, cal_url: str) -> dict[str, str]:
     """
     PROPFIND Depth:1 → {obj_url: etag} für alle Calendar Objects.
@@ -180,22 +188,19 @@ def _propfind_etags(client, cal_url: str) -> dict[str, str]:
         logger.warning("Could not parse PROPFIND response for %s: %s", cal_url, exc)
         return etags
 
-    base_url = str(client.url).rstrip("/")
+    from urllib.parse import urlparse
+
+    host = _host_url(client)
+    cal_path = urlparse(cal_url).path.rstrip("/")
 
     for response in tree.findall("d:response", NS):
         href = response.findtext("d:href", namespaces=NS) or ""
-        # Skip the calendar collection itself
-        cal_path = cal_url.replace(base_url, "").rstrip("/")
         if href.rstrip("/") == cal_path:
             continue
         etag_el = response.find(".//d:getetag", NS)
         etag = etag_el.text.strip('"') if etag_el is not None and etag_el.text else ""
         if href:
-            # Normalize to full URL
-            if href.startswith("/"):
-                full_url = base_url + href
-            else:
-                full_url = href
+            full_url = host + href if href.startswith("/") else href
             etags[full_url] = etag
 
     return etags
@@ -209,12 +214,12 @@ def _multiget_ical(client, cal_url: str, urls: list[str]) -> dict[str, tuple[str
     if not urls:
         return {}
 
-    base_url = str(client.url).rstrip("/")
+    from urllib.parse import urlparse
 
-    # Build <d:href> elements — use path-only hrefs as CalDAV servers prefer
-    hrefs_xml = "\n  ".join(
-        f"<d:href>{url.replace(base_url, '')}</d:href>" for url in urls
-    )
+    host = _host_url(client)
+
+    # Build <d:href> elements — path-only hrefs
+    hrefs_xml = "\n  ".join(f"<d:href>{urlparse(url).path}</d:href>" for url in urls)
     body = _MULTIGET_TMPL.format(hrefs=hrefs_xml)
 
     resp = client.report(url=cal_url, query=body, depth=1)
@@ -229,7 +234,7 @@ def _multiget_ical(client, cal_url: str, urls: list[str]) -> dict[str, tuple[str
 
     for response in tree.findall("d:response", NS):
         href = response.findtext("d:href", namespaces=NS) or ""
-        full_url = base_url + href if href.startswith("/") else href
+        full_url = host + href if href.startswith("/") else href
 
         etag_el = response.find(".//d:getetag", NS)
         etag = etag_el.text.strip('"') if etag_el is not None and etag_el.text else ""
