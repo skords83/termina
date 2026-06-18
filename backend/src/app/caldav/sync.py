@@ -62,6 +62,7 @@ _DISCOVERY_BODY = """<?xml version="1.0" encoding="utf-8"?>
     <d:resourcetype/>
     <a:calendar-color/>
     <cs:getctag/>
+    <cs:source/>
   </d:prop>
 </d:propfind>"""
 
@@ -127,6 +128,17 @@ def _discover_calendars(client: Any) -> list[dict]:
         ctag_el = response.find(f".//{{{NS_CS}}}getctag", NS)
         ctag = ctag_el.text if ctag_el is not None and ctag_el.text else None
 
+        # Subscribed-Kalender erkennen und Source-URL extrahieren
+        is_subscribed = f"{{{NS_CS}}}subscribed" in types
+        source_url = None
+        if is_subscribed:
+            source_el = response.find(f".//{{{NS_CS}}}source/d:href", NS)
+            if source_el is not None and source_el.text:
+                source_url = source_el.text.strip()
+                # webcal:// → https://
+                if source_url.startswith("webcal://"):
+                    source_url = "https://" + source_url[len("webcal://") :]
+
         # Volle URL zusammenbauen — hrefs sind absolute Pfade (/remote.php/...)
         if href.startswith("/"):
             full_url = host_url + href
@@ -139,9 +151,16 @@ def _discover_calendars(client: Any) -> list[dict]:
                 "name": displayname,
                 "color": color,
                 "ctag": ctag,
+                "subscribed": is_subscribed,
+                "source_url": source_url,
             }
         )
-        logger.debug("Discovered calendar: %s (%s)", displayname, full_url)
+        logger.debug(
+            "Discovered calendar: %s (%s)%s",
+            displayname,
+            full_url,
+            f" [subscribed: {source_url}]" if is_subscribed else "",
+        )
 
     logger.info("Discovered %d calendars", len(calendars))
     return calendars
@@ -360,7 +379,159 @@ def _upsert_event(
         )
 
 
+def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
+    """
+    Sync für ICS-Abo-Kalender (cs:subscribed).
+    Nextcloud liefert diese Events nicht per PROPFIND/REPORT,
+    daher holen wir das ICS direkt von der Quell-URL.
+    """
+    import urllib.request
+
+    cal_url = cal_info["url"]
+    ctag = cal_info["ctag"]
+    source_url = cal_info.get("source_url")
+
+    db_cal = db.get(Calendar, cal_url)
+    if db_cal is None:
+        db_cal = Calendar(
+            id=cal_url,
+            name=cal_info["name"],
+            color=cal_info["color"],
+            ctag=None,
+            last_synced_at=None,
+        )
+        db.add(db_cal)
+        db.flush()
+        logger.info("New subscribed calendar: %s", cal_info["name"])
+    else:
+        db_cal.name = cal_info["name"]
+        if cal_info["color"]:
+            db_cal.color = cal_info["color"]
+
+    if ctag and db_cal.ctag == ctag:
+        logger.debug(
+            "Subscribed calendar %s unchanged (ctag match), skipping.", db_cal.name
+        )
+        return
+
+    if not source_url:
+        logger.warning(
+            "Subscribed calendar %s has no source URL, skipping.", db_cal.name
+        )
+        db_cal.ctag = ctag
+        db_cal.last_synced_at = datetime.now(timezone.utc)
+        db.commit()
+        return
+
+    logger.info("Syncing subscribed calendar: %s from %s", db_cal.name, source_url)
+
+    # ICS direkt von der Quelle holen
+    try:
+        req = urllib.request.Request(
+            source_url,
+            headers={
+                "User-Agent": "Termina/1.0 CalDAV-Sync",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw_ics = resp.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        logger.error("Failed to fetch subscribed ICS for %s: %s", db_cal.name, exc)
+        return
+
+    # Alle VEVENTs parsen
+    try:
+        ical = ICalendar.from_ical(raw_ics)
+    except Exception as exc:
+        logger.error("Failed to parse ICS for %s: %s", db_cal.name, exc)
+        return
+
+    local_events: dict[str, Event] = {
+        e.uid: e for e in db.query(Event).filter(Event.calendar_id == cal_url).all()
+    }
+    seen_uids: set[str] = set()
+    upserted = 0
+
+    for component in ical.walk("VEVENT"):
+        uid = str(component.get("UID", ""))
+        if not uid:
+            continue
+        # Nur Master-Events (kein RECURRENCE-ID) — Overrides werden ggf. separat behandelt
+        rid_prop = component.get("RECURRENCE-ID")
+        if rid_prop is not None:
+            continue
+
+        seen_uids.add(uid)
+
+        summary = str(component.get("SUMMARY", "")) or None
+        location = str(component.get("LOCATION", "")) or None
+        description = str(component.get("DESCRIPTION", "")) or None
+        rrule_prop = component.get("RRULE")
+        rrule = str(rrule_prop.to_ical().decode()) if rrule_prop else None
+
+        start_raw = component.get("DTSTART")
+        start_val = start_raw.dt if start_raw else None
+        start_dt, all_day = _parse_dt(start_val)
+
+        end_raw = component.get("DTEND") or component.get("DURATION")
+        end_val = end_raw.dt if end_raw else None
+        end_dt, _ = _parse_dt(end_val)
+
+        existing = local_events.get(uid)
+        if existing:
+            existing.summary = summary
+            existing.start = start_dt
+            existing.end = end_dt
+            existing.all_day = all_day
+            existing.rrule = rrule
+            existing.location = location
+            existing.description = description
+            existing.etag = ctag or ""
+        else:
+            db.add(
+                Event(
+                    uid=uid,
+                    calendar_id=cal_url,
+                    etag=ctag or "",
+                    summary=summary,
+                    start=start_dt,
+                    end=end_dt,
+                    all_day=all_day,
+                    rrule=rrule,
+                    location=location,
+                    description=description,
+                    raw_ical="",
+                )
+            )
+        upserted += 1
+
+    # Gelöschte Events entfernen
+    deleted_count = 0
+    for uid, event in local_events.items():
+        if uid not in seen_uids:
+            db.query(EventOverride).filter(EventOverride.master_uid == uid).delete(
+                synchronize_session=False
+            )
+            db.delete(event)
+            deleted_count += 1
+
+    db_cal.ctag = ctag
+    db_cal.last_synced_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info(
+        "Sync complete for subscribed %s: %d upserted, %d deleted",
+        db_cal.name,
+        upserted,
+        deleted_count,
+    )
+
+
 def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
+    # Subscribed-Kalender haben einen eigenen Sync-Pfad
+    if cal_info.get("subscribed"):
+        _sync_subscribed_calendar(db, cal_info)
+        return
+
     cal_url = cal_info["url"]
     ctag = cal_info["ctag"]
 
