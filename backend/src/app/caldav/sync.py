@@ -7,7 +7,7 @@ from icalendar import Calendar as ICalendar
 from lxml import etree
 from sqlalchemy.orm import Session
 
-from app.caldav.client import get_principal
+from app.caldav.client import get_caldav_client
 from app.db.models import Calendar, Event, EventOverride
 from app.db.session import SessionLocal
 
@@ -18,7 +18,22 @@ BERLIN = zoneinfo.ZoneInfo("Europe/Berlin")
 # CalDAV XML namespaces
 NS_DAV = "DAV:"
 NS_CAL = "urn:ietf:params:xml:ns:caldav"
-NS = {"d": NS_DAV, "cal": NS_CAL}
+NS_CS = "http://calendarserver.org/ns/"
+NS = {"d": NS_DAV, "cal": NS_CAL, "cs": NS_CS}
+
+# Ressourcentypen die als Kalender behandelt werden
+_CALENDAR_TYPES = {
+    f"{{{NS_CAL}}}calendar",
+    f"{{{NS_CS}}}subscribed",
+}
+
+# Ressourcentypen die wir explizit ignorieren wollen
+_IGNORE_TYPES = {
+    f"{{{NS_CAL}}}schedule-inbox",
+    f"{{{NS_CAL}}}schedule-outbox",
+    "{http://nextcloud.com/ns}trash-bin",
+    "{http://nextcloud.com/ns}deleted-calendar",
+}
 
 # PROPFIND body: request getetag for all calendar objects
 _PROPFIND_ETAG_BODY = """<?xml version="1.0" encoding="utf-8"?>
@@ -37,6 +52,96 @@ _MULTIGET_TMPL = """<?xml version="1.0" encoding="utf-8"?>
   </d:prop>
   {hrefs}
 </cal:calendar-multiget>"""
+
+_DISCOVERY_BODY = """<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav"
+            xmlns:cs="http://calendarserver.org/ns/"
+            xmlns:a="http://apple.com/ns/ical/">
+  <d:prop>
+    <d:displayname/>
+    <d:resourcetype/>
+    <a:calendar-color/>
+    <cs:getctag/>
+  </d:prop>
+</d:propfind>"""
+
+
+def _discover_calendars(client: Any) -> list[dict]:
+    """
+    Eigenes PROPFIND auf den Kalender-Root — gibt cal:calendar UND
+    cs:subscribed zurück. Die caldav-Lib filtert subscribed heraus,
+    daher machen wir das selbst.
+    """
+    import re
+
+    from app.config import settings
+
+    # Kalender-Root aus caldav_url ableiten
+    # caldav_url = https://nc.skords.de/remote.php/dav
+    # → https://nc.skords.de/remote.php/dav/calendars/<username>/
+    base_url = str(client.url).rstrip("/")
+    username = settings.caldav_username
+    cal_root = f"{base_url}/calendars/{username}/"
+
+    resp = client.propfind(
+        url=cal_root,
+        props=_DISCOVERY_BODY,
+        depth=1,
+    )
+    raw_xml = resp.raw if isinstance(resp.raw, bytes) else resp.raw.encode()
+    tree = etree.fromstring(raw_xml)
+
+    calendars = []
+    for response in tree.findall("d:response", NS):
+        href = response.findtext("d:href", namespaces=NS) or ""
+
+        # Ressourcentypen sammeln
+        resourcetype_el = response.find(".//d:resourcetype", NS)
+        if resourcetype_el is None:
+            continue
+        types = {child.tag for child in resourcetype_el}
+
+        # Ignorierte Typen überspringen
+        if types & _IGNORE_TYPES:
+            continue
+
+        # Nur bekannte Kalender-Typen durchlassen
+        if not (types & _CALENDAR_TYPES):
+            continue
+
+        displayname = response.findtext(".//d:displayname", namespaces=NS) or ""
+        if not displayname:
+            # Fallback: letztes Segment der URL
+            displayname = href.rstrip("/").split("/")[-1]
+
+        color_el = response.find(".//{http://apple.com/ns/ical/}calendar-color", NS)
+        color = (
+            color_el.text.strip()[:7]
+            if color_el is not None and color_el.text
+            else None
+        )
+
+        ctag_el = response.find(f".//{{{NS_CS}}}getctag", NS)
+        ctag = ctag_el.text if ctag_el is not None and ctag_el.text else None
+
+        # Volle URL zusammenbauen
+        if href.startswith("/"):
+            full_url = base_url + href
+        else:
+            full_url = href
+
+        calendars.append(
+            {
+                "url": full_url,
+                "name": displayname,
+                "color": color,
+                "ctag": ctag,
+            }
+        )
+        logger.debug("Discovered calendar: %s (%s)", displayname, full_url)
+
+    logger.info("Discovered %d calendars", len(calendars))
+    return calendars
 
 
 def _parse_dt(value) -> tuple[datetime | None, bool]:
@@ -247,42 +352,30 @@ def _upsert_event(
         )
 
 
-def _sync_calendar(db: Session, caldav_calendar) -> None:
-    cal_url = str(caldav_calendar.url)
-    client = caldav_calendar.client
-
-    # ── 1. CTag prüfen ──────────────────────────────────────────────────────
-    ctag = None
-    try:
-        from caldav.elements import dav
-
-        props = caldav_calendar.get_properties([dav.GetCTag()])
-        ctag = str(props.get("{http://calendarserver.org/ns/}getctag", "")) or None
-    except Exception:
-        pass
+def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
+    cal_url = cal_info["url"]
+    ctag = cal_info["ctag"]
 
     db_cal = db.get(Calendar, cal_url)
     if db_cal is None:
-        color = None
-        try:
-            from caldav.elements import cdav
-
-            props = caldav_calendar.get_properties([cdav.CalendarColor()])
-            color = props.get("{http://apple.com/ns/ical/}calendar-color")
-        except Exception:
-            pass
         db_cal = Calendar(
             id=cal_url,
-            name=caldav_calendar.name or "Unnamed",
-            color=color,
+            name=cal_info["name"],
+            color=cal_info["color"],
             ctag=None,
             last_synced_at=None,
         )
         db.add(db_cal)
         db.flush()
+        logger.info("New calendar: %s", cal_info["name"])
+    else:
+        # Name/Farbe aktualisieren falls geändert
+        db_cal.name = cal_info["name"]
+        if cal_info["color"]:
+            db_cal.color = cal_info["color"]
 
     if ctag and db_cal.ctag == ctag:
-        logger.debug("Calendar %s unchanged (ctag match), skipping.", cal_url)
+        logger.debug("Calendar %s unchanged (ctag match), skipping.", db_cal.name)
         return
 
     logger.info("Syncing calendar: %s", db_cal.name)
@@ -352,7 +445,7 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
             db.delete(event)
             deleted_count += 1
 
-    # ── 6. CTag aktualisieren ─────────────────────────────────────────────────
+    # ── 6. CTag + Kalender entfernen die nicht mehr existieren ───────────────
     db_cal.ctag = ctag
     db_cal.last_synced_at = datetime.now(timezone.utc)
     db.commit()
@@ -369,14 +462,28 @@ def run_sync() -> None:
     logger.info("Starting CalDAV sync run")
     db: Session = SessionLocal()
     try:
-        principal = get_principal()
-        calendars = principal.calendars()
-        for cal in calendars:
+        client = get_caldav_client()
+
+        # Eigene Discovery statt principal.calendars() — erfasst auch subscribed
+        calendars = _discover_calendars(client)
+        remote_urls = {c["url"] for c in calendars}
+
+        for cal_info in calendars:
             try:
-                _sync_calendar(db, cal)
+                _sync_calendar(db, client, cal_info)
             except Exception as exc:
-                logger.error("Error syncing calendar %s: %s", cal.url, exc)
+                logger.error("Error syncing calendar %s: %s", cal_info["url"], exc)
                 db.rollback()
+
+        # Kalender die in Nextcloud gelöscht wurden aus DB entfernen
+        existing_cals = db.query(Calendar).all()
+        for db_cal in existing_cals:
+            if db_cal.id not in remote_urls:
+                logger.info("Removing deleted calendar: %s", db_cal.name)
+                db.query(Event).filter(Event.calendar_id == db_cal.id).delete()
+                db.delete(db_cal)
+        db.commit()
+
     except Exception as exc:
         logger.error("Sync run failed: %s", exc)
     finally:
