@@ -10,10 +10,10 @@
 // Bei Serien-Edit (event.is_recurring === true) erscheint zuerst
 // ein Auswahl-Dialog: "Nur diese Instanz" oder "Alle zukünftigen" oder "Alle".
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { createEvent, updateEvent } from '../api/write';
-import { useToast } from './Toast';
-import type { CalendarEvent, CreateEventPayload, WriteError } from '../types';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createEvent, updateEvent } from "../api/write";
+import { useToast } from "./Toast";
+import type { CalendarEvent, CreateEventPayload, WriteError } from "../types";
 
 interface Calendar {
   id: string;
@@ -28,14 +28,14 @@ interface BaseProps {
 }
 
 interface CreateProps extends BaseProps {
-  mode: 'create';
-  defaultDate?: string;       // "YYYY-MM-DD"
+  mode: "create";
+  defaultDate?: string; // "YYYY-MM-DD"
   defaultCalendarId?: string;
   event?: never;
 }
 
 interface EditProps extends BaseProps {
-  mode: 'edit';
+  mode: "edit";
   event: CalendarEvent;
   defaultDate?: never;
   defaultCalendarId?: never;
@@ -45,23 +45,26 @@ type Props = CreateProps | EditProps;
 
 // ── RRULE-Helpers ─────────────────────────────────────────────────────────────
 
-type RecurFreq = 'none' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
+type RecurFreq = "none" | "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
 
 const FREQ_LABELS: Record<RecurFreq, string> = {
-  none: 'Nicht wiederholen',
-  DAILY: 'Täglich',
-  WEEKLY: 'Wöchentlich',
-  MONTHLY: 'Monatlich',
-  YEARLY: 'Jährlich',
+  none: "Nicht wiederholen",
+  DAILY: "Täglich",
+  WEEKLY: "Wöchentlich",
+  MONTHLY: "Monatlich",
+  YEARLY: "Jährlich",
 };
 
 /** Extrahiert FREQ und UNTIL aus einem RRULE-String. */
-function parseRrule(rrule: string | null | undefined): { freq: RecurFreq; until: string } {
-  if (!rrule) return { freq: 'none', until: '' };
+function parseRrule(rrule: string | null | undefined): {
+  freq: RecurFreq;
+  until: string;
+} {
+  if (!rrule) return { freq: "none", until: "" };
   const freqMatch = rrule.match(/FREQ=([A-Z]+)/);
   const untilMatch = rrule.match(/UNTIL=(\d{8}(?:T\d{6}Z?)?)/);
-  const freq = (freqMatch?.[1] ?? 'none') as RecurFreq;
-  let until = '';
+  const freq = (freqMatch?.[1] ?? "none") as RecurFreq;
+  let until = "";
   if (untilMatch) {
     // "20261231" → "2026-12-31"
     const raw = untilMatch[1].slice(0, 8);
@@ -72,10 +75,10 @@ function parseRrule(rrule: string | null | undefined): { freq: RecurFreq; until:
 
 /** Baut einen RRULE-String aus freq + optionalem Enddatum. */
 function buildRrule(freq: RecurFreq, until: string): string | null {
-  if (freq === 'none') return null;
+  if (freq === "none") return null;
   let s = `FREQ=${freq}`;
   if (until) {
-    const compact = until.replace(/-/g, '');
+    const compact = until.replace(/-/g, "");
     s += `;UNTIL=${compact}T235959Z`;
   }
   return s;
@@ -84,18 +87,24 @@ function buildRrule(freq: RecurFreq, until: string): string | null {
 // ── Datum/Zeit-Helpers ────────────────────────────────────────────────────────
 
 function toLocalDatetimeValue(isoStr: string): string {
-  if (!isoStr.endsWith('Z') && !isoStr.includes('+')) {
+  if (!isoStr.endsWith("Z") && !isoStr.includes("+")) {
     return isoStr.slice(0, 16);
   }
   const d = new Date(isoStr);
-  const pad = (n: number) => String(n).padStart(2, '0');
+  const pad = (n: number) => String(n).padStart(2, "0");
   return (
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
     `T${pad(d.getHours())}:${pad(d.getMinutes())}`
   );
 }
 
-function toLocalDateValue(isoStr: string): string {
+function toLocalDateValue(isoStr: string, exclusiveEnd = false): string {
+  if (exclusiveEnd) {
+    const [y, m, d] = isoStr.slice(0, 10).split("-").map(Number);
+    const dt = new Date(y, m - 1, d - 1);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+  }
   return isoStr.slice(0, 10);
 }
 
@@ -106,7 +115,7 @@ function localDatetimeToISO(localStr: string): string {
 function makeDefaultStart(defaultDate?: string): string {
   if (defaultDate) return `${defaultDate}T09:00`;
   const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
+  const pad = (n: number) => String(n).padStart(2, "0");
   return (
     `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
     `T${pad(now.getHours() + 1)}:00`
@@ -114,25 +123,25 @@ function makeDefaultStart(defaultDate?: string): string {
 }
 
 function addHour(localDatetime: string): string {
-  const [date, time] = localDatetime.split('T');
-  const [h, m] = time.split(':').map(Number);
+  const [date, time] = localDatetime.split("T");
+  const [h, m] = time.split(":").map(Number);
   const next = h + 1;
-  if (next > 23) return `${date}T23:${String(m).padStart(2, '0')}`;
-  return `${date}T${String(next).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  if (next > 23) return `${date}T23:${String(m).padStart(2, "0")}`;
+  return `${date}T${String(next).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
 function describeWriteError(err: WriteError): string {
   switch (err.type) {
-    case 'conflict':
-      return 'Der Termin wurde zwischenzeitlich extern geändert. Bitte Seite neu laden.';
-    case 'not_found':
-      return 'Termin oder Kalender nicht gefunden (404).';
-    case 'nextcloud_down':
-      return 'Nextcloud ist gerade nicht erreichbar. Bitte später erneut versuchen.';
-    case 'auth':
-      return 'Authentifizierung fehlgeschlagen. Bitte neu einloggen.';
+    case "conflict":
+      return "Der Termin wurde zwischenzeitlich extern geändert. Bitte Seite neu laden.";
+    case "not_found":
+      return "Termin oder Kalender nicht gefunden (404).";
+    case "nextcloud_down":
+      return "Nextcloud ist gerade nicht erreichbar. Bitte später erneut versuchen.";
+    case "auth":
+      return "Authentifizierung fehlgeschlagen. Bitte neu einloggen.";
     default:
-      return `Unbekannter Fehler (${(err as { type: string; status?: number }).status ?? '?'}).`;
+      return `Unbekannter Fehler (${(err as { type: string; status?: number }).status ?? "?"}).`;
   }
 }
 
@@ -140,240 +149,240 @@ function describeWriteError(err: WriteError): string {
 
 const S = {
   overlay: {
-    position: 'fixed' as const,
+    position: "fixed" as const,
     inset: 0,
-    background: 'rgba(0,0,0,0.55)',
-    backdropFilter: 'blur(2px)',
+    background: "rgba(0,0,0,0.55)",
+    backdropFilter: "blur(2px)",
     zIndex: 1000,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   modal: {
-    background: '#1e1e1e',
-    border: '1px solid #2e2e2e',
-    borderRadius: '0.75rem',
-    width: '100%',
-    maxWidth: '28rem',
-    padding: '1.5rem',
-    boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
-    fontFamily: 'DM Sans, sans-serif',
-    color: '#e8e6e3',
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '1rem',
-    maxHeight: '90vh',
-    overflowY: 'auto' as const,
+    background: "#1e1e1e",
+    border: "1px solid #2e2e2e",
+    borderRadius: "0.75rem",
+    width: "100%",
+    maxWidth: "28rem",
+    padding: "1.5rem",
+    boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
+    fontFamily: "DM Sans, sans-serif",
+    color: "#e8e6e3",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "1rem",
+    maxHeight: "90vh",
+    overflowY: "auto" as const,
   },
   header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   title: {
-    fontSize: '1rem',
+    fontSize: "1rem",
     fontWeight: 600,
-    letterSpacing: '-0.01em',
-    color: '#f0eeeb',
+    letterSpacing: "-0.01em",
+    color: "#f0eeeb",
     margin: 0,
   },
   closeBtn: {
-    background: 'none',
-    border: 'none',
-    color: '#666',
-    fontSize: '1.25rem',
-    cursor: 'pointer',
+    background: "none",
+    border: "none",
+    color: "#666",
+    fontSize: "1.25rem",
+    cursor: "pointer",
     lineHeight: 1,
-    padding: '0.125rem 0.25rem',
-    borderRadius: '0.25rem',
+    padding: "0.125rem 0.25rem",
+    borderRadius: "0.25rem",
   },
   field: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '0.375rem',
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "0.375rem",
   },
   label: {
-    fontSize: '0.75rem',
+    fontSize: "0.75rem",
     fontWeight: 500,
-    color: '#888',
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.06em',
+    color: "#888",
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.06em",
   },
   input: {
-    background: '#151515',
-    border: '1px solid #2e2e2e',
-    borderRadius: '0.375rem',
-    color: '#e8e6e3',
-    padding: '0.5rem 0.625rem',
-    fontSize: '0.875rem',
-    fontFamily: 'DM Sans, sans-serif',
-    outline: 'none',
-    width: '100%',
-    boxSizing: 'border-box' as const,
+    background: "#151515",
+    border: "1px solid #2e2e2e",
+    borderRadius: "0.375rem",
+    color: "#e8e6e3",
+    padding: "0.5rem 0.625rem",
+    fontSize: "0.875rem",
+    fontFamily: "DM Sans, sans-serif",
+    outline: "none",
+    width: "100%",
+    boxSizing: "border-box" as const,
   },
   textarea: {
-    background: '#151515',
-    border: '1px solid #2e2e2e',
-    borderRadius: '0.375rem',
-    color: '#e8e6e3',
-    padding: '0.5rem 0.625rem',
-    fontSize: '0.875rem',
-    fontFamily: 'DM Sans, sans-serif',
-    outline: 'none',
-    width: '100%',
-    boxSizing: 'border-box' as const,
-    resize: 'vertical' as const,
-    minHeight: '4rem',
+    background: "#151515",
+    border: "1px solid #2e2e2e",
+    borderRadius: "0.375rem",
+    color: "#e8e6e3",
+    padding: "0.5rem 0.625rem",
+    fontSize: "0.875rem",
+    fontFamily: "DM Sans, sans-serif",
+    outline: "none",
+    width: "100%",
+    boxSizing: "border-box" as const,
+    resize: "vertical" as const,
+    minHeight: "4rem",
   },
   select: {
-    background: '#151515',
-    border: '1px solid #2e2e2e',
-    borderRadius: '0.375rem',
-    color: '#e8e6e3',
-    padding: '0.5rem 0.625rem',
-    fontSize: '0.875rem',
-    fontFamily: 'DM Sans, sans-serif',
-    outline: 'none',
-    width: '100%',
-    cursor: 'pointer',
+    background: "#151515",
+    border: "1px solid #2e2e2e",
+    borderRadius: "0.375rem",
+    color: "#e8e6e3",
+    padding: "0.5rem 0.625rem",
+    fontSize: "0.875rem",
+    fontFamily: "DM Sans, sans-serif",
+    outline: "none",
+    width: "100%",
+    cursor: "pointer",
   },
   row: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '0.75rem',
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "0.75rem",
   },
   toggle: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.5rem',
-    cursor: 'pointer',
-    userSelect: 'none' as const,
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    cursor: "pointer",
+    userSelect: "none" as const,
   },
   toggleCheckbox: {
-    width: '1rem',
-    height: '1rem',
-    cursor: 'pointer',
-    accentColor: '#5b8ef7',
+    width: "1rem",
+    height: "1rem",
+    cursor: "pointer",
+    accentColor: "#5b8ef7",
   },
   toggleLabel: {
-    fontSize: '0.875rem',
-    color: '#aaa',
+    fontSize: "0.875rem",
+    color: "#aaa",
   },
   divider: {
-    borderTop: '1px solid #2a2a2a',
-    margin: '0.25rem 0',
+    borderTop: "1px solid #2a2a2a",
+    margin: "0.25rem 0",
   },
   recurBox: {
-    background: '#181818',
-    border: '1px solid #2a2a2a',
-    borderRadius: '0.5rem',
-    padding: '0.75rem',
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '0.625rem',
+    background: "#181818",
+    border: "1px solid #2a2a2a",
+    borderRadius: "0.5rem",
+    padding: "0.75rem",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "0.625rem",
   },
   recurRow: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '0.75rem',
-    alignItems: 'end',
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "0.75rem",
+    alignItems: "end",
   },
   footer: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: '0.5rem',
-    paddingTop: '0.25rem',
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: "0.5rem",
+    paddingTop: "0.25rem",
   },
   btnCancel: {
-    background: 'none',
-    border: '1px solid #2e2e2e',
-    borderRadius: '0.375rem',
-    color: '#888',
-    padding: '0.5rem 1rem',
-    fontSize: '0.875rem',
-    fontFamily: 'DM Sans, sans-serif',
-    cursor: 'pointer',
+    background: "none",
+    border: "1px solid #2e2e2e",
+    borderRadius: "0.375rem",
+    color: "#888",
+    padding: "0.5rem 1rem",
+    fontSize: "0.875rem",
+    fontFamily: "DM Sans, sans-serif",
+    cursor: "pointer",
   },
   btnSave: {
-    background: '#5b8ef7',
-    border: 'none',
-    borderRadius: '0.375rem',
-    color: '#fff',
-    padding: '0.5rem 1.25rem',
-    fontSize: '0.875rem',
-    fontFamily: 'DM Sans, sans-serif',
+    background: "#5b8ef7",
+    border: "none",
+    borderRadius: "0.375rem",
+    color: "#fff",
+    padding: "0.5rem 1.25rem",
+    fontSize: "0.875rem",
+    fontFamily: "DM Sans, sans-serif",
     fontWeight: 500,
-    cursor: 'pointer',
+    cursor: "pointer",
   },
   btnSaveDisabled: {
     opacity: 0.5,
-    cursor: 'not-allowed',
+    cursor: "not-allowed",
   },
   // Scope-Dialog (Nur diese / Alle)
   scopeOverlay: {
-    position: 'fixed' as const,
+    position: "fixed" as const,
     inset: 0,
-    background: 'rgba(0,0,0,0.65)',
-    backdropFilter: 'blur(2px)',
+    background: "rgba(0,0,0,0.65)",
+    backdropFilter: "blur(2px)",
     zIndex: 1100,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   scopeBox: {
-    background: '#1e1e1e',
-    border: '1px solid #2e2e2e',
-    borderRadius: '0.75rem',
-    padding: '1.5rem',
-    width: '100%',
-    maxWidth: '22rem',
-    boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
-    fontFamily: 'DM Sans, sans-serif',
-    color: '#e8e6e3',
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '1rem',
+    background: "#1e1e1e",
+    border: "1px solid #2e2e2e",
+    borderRadius: "0.75rem",
+    padding: "1.5rem",
+    width: "100%",
+    maxWidth: "22rem",
+    boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
+    fontFamily: "DM Sans, sans-serif",
+    color: "#e8e6e3",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "1rem",
   },
   scopeTitle: {
-    fontSize: '0.9375rem',
+    fontSize: "0.9375rem",
     fontWeight: 600,
-    color: '#f0eeeb',
+    color: "#f0eeeb",
     margin: 0,
   },
   scopeSubtitle: {
-    fontSize: '0.8125rem',
-    color: '#777',
-    margin: '-0.5rem 0 0',
+    fontSize: "0.8125rem",
+    color: "#777",
+    margin: "-0.5rem 0 0",
   },
   scopeOptions: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '0.375rem',
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "0.375rem",
   },
   scopeOption: (active: boolean) => ({
-    background: active ? 'rgba(91,142,247,0.12)' : '#151515',
-    border: `1px solid ${active ? '#5b8ef7' : '#2e2e2e'}`,
-    borderRadius: '0.375rem',
-    color: active ? '#a8c4fb' : '#ccc',
-    padding: '0.625rem 0.875rem',
-    fontSize: '0.875rem',
-    fontFamily: 'DM Sans, sans-serif',
-    cursor: 'pointer',
-    textAlign: 'left' as const,
-    transition: 'all 0.1s',
+    background: active ? "rgba(91,142,247,0.12)" : "#151515",
+    border: `1px solid ${active ? "#5b8ef7" : "#2e2e2e"}`,
+    borderRadius: "0.375rem",
+    color: active ? "#a8c4fb" : "#ccc",
+    padding: "0.625rem 0.875rem",
+    fontSize: "0.875rem",
+    fontFamily: "DM Sans, sans-serif",
+    cursor: "pointer",
+    textAlign: "left" as const,
+    transition: "all 0.1s",
   }),
   scopeFooter: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: '0.5rem',
-    borderTop: '1px solid #2a2a2a',
-    paddingTop: '0.75rem',
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: "0.5rem",
+    borderTop: "1px solid #2a2a2a",
+    paddingTop: "0.75rem",
   },
 };
 
 // ── Scope-Dialog (bei Serien-Edit) ────────────────────────────────────────────
 
-type EditScope = 'single' | 'all';
+type EditScope = "single" | "all";
 
 interface ScopeDialogProps {
   onSelect: (scope: EditScope) => void;
@@ -381,7 +390,7 @@ interface ScopeDialogProps {
 }
 
 function ScopeDialog({ onSelect, onCancel }: ScopeDialogProps) {
-  const [selected, setSelected] = useState<EditScope>('single');
+  const [selected, setSelected] = useState<EditScope>("single");
 
   return (
     <div style={S.scopeOverlay}>
@@ -392,14 +401,14 @@ function ScopeDialog({ onSelect, onCancel }: ScopeDialogProps) {
         </div>
         <div style={S.scopeOptions}>
           <button
-            style={S.scopeOption(selected === 'single')}
-            onClick={() => setSelected('single')}
+            style={S.scopeOption(selected === "single")}
+            onClick={() => setSelected("single")}
           >
             Nur dieser Termin
           </button>
           <button
-            style={S.scopeOption(selected === 'all')}
-            onClick={() => setSelected('all')}
+            style={S.scopeOption(selected === "all")}
+            onClick={() => setSelected("all")}
           >
             Alle Termine der Serie
           </button>
@@ -408,10 +417,7 @@ function ScopeDialog({ onSelect, onCancel }: ScopeDialogProps) {
           <button style={S.btnCancel} onClick={onCancel}>
             Abbrechen
           </button>
-          <button
-            style={S.btnSave}
-            onClick={() => onSelect(selected)}
-          >
+          <button style={S.btnSave} onClick={() => onSelect(selected)}>
             Weiter
           </button>
         </div>
@@ -422,44 +428,50 @@ function ScopeDialog({ onSelect, onCancel }: ScopeDialogProps) {
 
 // ── Hauptkomponente ───────────────────────────────────────────────────────────
 
-export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props) {
+export function EventFormModal({
+  calendars,
+  onClose,
+  onSaved,
+  ...props
+}: Props) {
   const { showToast } = useToast();
 
-  const isEdit = props.mode === 'edit';
+  const isEdit = props.mode === "edit";
   const existingEvent = isEdit ? props.event : undefined;
 
   // Bei Serientermin-Edit zuerst Scope-Dialog zeigen
   // null = noch nicht entschieden, 'single' oder 'all' = entschieden
   const [editScope, setEditScope] = useState<EditScope | null>(
-    isEdit && existingEvent?.is_recurring ? null : 'all'
+    isEdit && existingEvent?.is_recurring ? null : "all",
   );
 
   const defaultStartStr = isEdit
     ? existingEvent!.all_day
       ? toLocalDateValue(existingEvent!.start)
       : toLocalDatetimeValue(existingEvent!.start)
-    : makeDefaultStart(props.mode === 'create' ? props.defaultDate : undefined);
+    : makeDefaultStart(props.mode === "create" ? props.defaultDate : undefined);
 
   const defaultEndStr = isEdit
     ? existingEvent!.all_day
-      ? toLocalDateValue(existingEvent!.end)
+      ? toLocalDateValue(existingEvent!.end, true)
       : toLocalDatetimeValue(existingEvent!.end)
     : addHour(defaultStartStr);
 
-  const defaultCalId =
-    isEdit
-      ? existingEvent!.calendar_id
-      : props.mode === 'create' && props.defaultCalendarId
+  const defaultCalId = isEdit
+    ? existingEvent!.calendar_id
+    : props.mode === "create" && props.defaultCalendarId
       ? props.defaultCalendarId
-      : calendars[0]?.id ?? '';
+      : (calendars[0]?.id ?? "");
 
-  const [summary, setSummary] = useState(existingEvent?.summary ?? '');
+  const [summary, setSummary] = useState(existingEvent?.summary ?? "");
   const [calendarId, setCalendarId] = useState(defaultCalId);
   const [allDay, setAllDay] = useState(existingEvent?.all_day ?? false);
   const [startStr, setStartStr] = useState(defaultStartStr);
   const [endStr, setEndStr] = useState(defaultEndStr);
-  const [location, setLocation] = useState(existingEvent?.location ?? '');
-  const [description, setDescription] = useState(existingEvent?.description ?? '');
+  const [location, setLocation] = useState(existingEvent?.location ?? "");
+  const [description, setDescription] = useState(
+    existingEvent?.description ?? "",
+  );
   const [saving, setSaving] = useState(false);
 
   // RRULE-State
@@ -478,10 +490,10 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === "Escape") onClose();
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
   const handleAllDayToggle = () => {
@@ -505,7 +517,14 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
     calendar_id: calendarId,
     summary: summary.trim(),
     start: allDay ? startStr : localDatetimeToISO(startStr),
-    end: allDay ? endStr : localDatetimeToISO(endStr),
+    end: allDay
+      ? (() => {
+          const [y, m, d] = endStr.split("-").map(Number);
+          const dt = new Date(y, m - 1, d + 1);
+          const pad = (n: number) => String(n).padStart(2, "0");
+          return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+        })()
+      : localDatetimeToISO(endStr),
     all_day: allDay,
     location: location.trim() || null,
     description: description.trim() || null,
@@ -526,7 +545,7 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
           ...payload,
           etag: existingEvent!.etag!,
           // Bei single-scope: recurrence_id mitschicken damit Backend nur diese Instanz ändert
-          ...(editScope === 'single' && existingEvent!.recurrence_id
+          ...(editScope === "single" && existingEvent!.recurrence_id
             ? { recurrence_id: existingEvent!.recurrence_id }
             : {}),
         });
@@ -555,22 +574,35 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
         };
       }
 
-      showToast(
-        isEdit ? 'Termin gespeichert' : 'Termin erstellt',
-        'success'
-      );
+      showToast(isEdit ? "Termin gespeichert" : "Termin erstellt", "success");
       onSaved(uid, savedEvent);
       onClose();
     } catch (err) {
       const writeErr = err as WriteError;
-      showToast(describeWriteError(writeErr), 'error');
-      if (writeErr.type === 'conflict') {
+      showToast(describeWriteError(writeErr), "error");
+      if (writeErr.type === "conflict") {
         onClose();
       }
     } finally {
       setSaving(false);
     }
-  }, [summary, calendarId, allDay, startStr, endStr, location, description, recurFreq, recurUntil, isEdit, existingEvent, editScope, showToast, onSaved, onClose]);
+  }, [
+    summary,
+    calendarId,
+    allDay,
+    startStr,
+    endStr,
+    location,
+    description,
+    recurFreq,
+    recurUntil,
+    isEdit,
+    existingEvent,
+    editScope,
+    showToast,
+    onSaved,
+    onClose,
+  ]);
 
   const canSave = summary.trim().length > 0 && calendarId;
 
@@ -585,12 +617,15 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
   }
 
   return (
-    <div style={S.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      style={S.overlay}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
       <div style={S.modal}>
         {/* Header */}
         <div style={S.header}>
           <h2 style={S.title}>
-            {isEdit ? 'Termin bearbeiten' : 'Neuer Termin'}
+            {isEdit ? "Termin bearbeiten" : "Neuer Termin"}
           </h2>
           <button style={S.closeBtn} onClick={onClose} aria-label="Schließen">
             ×
@@ -605,7 +640,9 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
             style={S.input}
             value={summary}
             onChange={(e) => setSummary(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && canSave && !saving && handleSubmit()}
+            onKeyDown={(e) =>
+              e.key === "Enter" && canSave && !saving && handleSubmit()
+            }
             placeholder="Terminbezeichnung"
           />
         </div>
@@ -688,7 +725,14 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
           <div style={S.recurBox}>
             <div style={S.recurRow}>
               <div style={S.field}>
-                <label style={{ ...S.label, textTransform: 'none', letterSpacing: 0, fontSize: '0.75rem' }}>
+                <label
+                  style={{
+                    ...S.label,
+                    textTransform: "none",
+                    letterSpacing: 0,
+                    fontSize: "0.75rem",
+                  }}
+                >
                   Häufigkeit
                 </label>
                 <select
@@ -696,10 +740,10 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
                   value={recurFreq}
                   onChange={(e) => {
                     setRecurFreq(e.target.value as RecurFreq);
-                    if (e.target.value === 'none') setRecurUntil('');
+                    if (e.target.value === "none") setRecurUntil("");
                   }}
                   // Bei single-scope Edit: RRULE-Änderung ist nicht sinnvoll (nur diese Instanz)
-                  disabled={editScope === 'single'}
+                  disabled={editScope === "single"}
                 >
                   {(Object.keys(FREQ_LABELS) as RecurFreq[]).map((f) => (
                     <option key={f} value={f}>
@@ -709,28 +753,36 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
                 </select>
               </div>
 
-              {recurFreq !== 'none' && (
+              {recurFreq !== "none" && (
                 <div style={S.field}>
-                  <label style={{ ...S.label, textTransform: 'none', letterSpacing: 0, fontSize: '0.75rem' }}>
+                  <label
+                    style={{
+                      ...S.label,
+                      textTransform: "none",
+                      letterSpacing: 0,
+                      fontSize: "0.75rem",
+                    }}
+                  >
                     Endet am (optional)
                   </label>
                   <input
                     type="date"
                     style={{
                       ...S.input,
-                      opacity: editScope === 'single' ? 0.4 : 1,
+                      opacity: editScope === "single" ? 0.4 : 1,
                     }}
                     value={recurUntil}
                     onChange={(e) => setRecurUntil(e.target.value)}
-                    disabled={editScope === 'single'}
+                    disabled={editScope === "single"}
                   />
                 </div>
               )}
             </div>
 
-            {editScope === 'single' && (
-              <p style={{ margin: 0, fontSize: '0.75rem', color: '#666' }}>
-                Wiederholungseinstellungen gelten für alle Termine der Serie — hier nicht änderbar.
+            {editScope === "single" && (
+              <p style={{ margin: 0, fontSize: "0.75rem", color: "#666" }}>
+                Wiederholungseinstellungen gelten für alle Termine der Serie —
+                hier nicht änderbar.
               </p>
             )}
           </div>
@@ -767,12 +819,12 @@ export function EventFormModal({ calendars, onClose, onSaved, ...props }: Props)
           <button
             style={{
               ...S.btnSave,
-              ...((!canSave || saving) ? S.btnSaveDisabled : {}),
+              ...(!canSave || saving ? S.btnSaveDisabled : {}),
             }}
             onClick={handleSubmit}
             disabled={!canSave || saving}
           >
-            {saving ? 'Speichern…' : 'Speichern'}
+            {saving ? "Speichern…" : "Speichern"}
           </button>
         </div>
       </div>
