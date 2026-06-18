@@ -72,7 +72,7 @@ def _discover_calendars(client: Any) -> list[dict]:
     cs:subscribed zurück. Die caldav-Lib filtert subscribed heraus,
     daher machen wir das selbst.
     """
-    import re
+    from urllib.parse import urlparse
 
     from app.config import settings
 
@@ -80,6 +80,9 @@ def _discover_calendars(client: Any) -> list[dict]:
     # caldav_url = https://nc.skords.de/remote.php/dav
     # → https://nc.skords.de/remote.php/dav/calendars/<username>/
     base_url = str(client.url).rstrip("/")
+    # Nur Schema + Host für href-Rekonstruktion (hrefs sind absolute Pfade)
+    parsed = urlparse(base_url)
+    host_url = f"{parsed.scheme}://{parsed.netloc}"
     username = settings.caldav_username
     cal_root = f"{base_url}/calendars/{username}/"
 
@@ -124,9 +127,9 @@ def _discover_calendars(client: Any) -> list[dict]:
         ctag_el = response.find(f".//{{{NS_CS}}}getctag", NS)
         ctag = ctag_el.text if ctag_el is not None and ctag_el.text else None
 
-        # Volle URL zusammenbauen
+        # Volle URL zusammenbauen — hrefs sind absolute Pfade (/remote.php/...)
         if href.startswith("/"):
-            full_url = base_url + href
+            full_url = host_url + href
         else:
             full_url = href
 
