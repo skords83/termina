@@ -525,14 +525,14 @@ const S = {
     border: "1px solid #2e2e2e",
     borderRadius: "0.75rem",
     width: "100%",
-    maxWidth: "28rem",
-    padding: "1.5rem",
+    maxWidth: "24rem",
+    padding: "1.25rem 1.25rem 1rem",
     boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
     fontFamily: "DM Sans, sans-serif",
     color: "#e8e6e3",
     display: "flex",
     flexDirection: "column" as const,
-    gap: "1rem",
+    gap: "0.875rem",
     maxHeight: "90vh",
     overflowY: "auto" as const,
   },
@@ -569,6 +569,11 @@ const S = {
     color: "#888",
     textTransform: "uppercase" as const,
     letterSpacing: "0.06em",
+  },
+  sublabel: {
+    fontSize: "0.75rem",
+    fontWeight: 500,
+    color: "#777",
   },
   input: {
     background: "#151515",
@@ -609,9 +614,32 @@ const S = {
     cursor: "pointer",
   },
   row: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "0.75rem",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "0.625rem",
+  },
+  dateSection: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "0.5rem",
+    background: "#181818",
+    border: "1px solid #2a2a2a",
+    borderRadius: "0.5rem",
+    padding: "0.625rem 0.75rem",
+  },
+  dateRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.625rem",
+  },
+  dateLabel: {
+    fontSize: "0.75rem",
+    fontWeight: 500,
+    color: "#888",
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.06em",
+    width: "1.75rem",
+    flexShrink: 0,
   },
   toggle: {
     display: "flex",
@@ -620,15 +648,26 @@ const S = {
     cursor: "pointer",
     userSelect: "none" as const,
   },
+  toggleInline: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.375rem",
+    cursor: "pointer",
+    userSelect: "none" as const,
+  },
   toggleCheckbox: {
-    width: "1rem",
-    height: "1rem",
+    width: "0.875rem",
+    height: "0.875rem",
     cursor: "pointer",
     accentColor: "#5b8ef7",
   },
   toggleLabel: {
     fontSize: "0.875rem",
     color: "#aaa",
+  },
+  toggleLabelSmall: {
+    fontSize: "0.75rem",
+    color: "#888",
   },
   divider: {
     borderTop: "1px solid #2a2a2a",
@@ -644,10 +683,9 @@ const S = {
     gap: "0.625rem",
   },
   recurRow: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "0.75rem",
-    alignItems: "end",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "0.625rem",
   },
   footer: {
     display: "flex",
@@ -848,9 +886,9 @@ function DateTimeField({
         onChange={(e) => handleTimeChange(e.target.value)}
         style={{
           ...S.input,
-          width: "88px",
+          width: "92px",
           flexShrink: 0,
-          padding: "0.5rem 0.4rem",
+          padding: "0.5rem 0.5rem",
           colorScheme: "dark",
         }}
       />
@@ -1059,6 +1097,15 @@ export function EventFormModal({
         onClick={(e) => e.target === e.currentTarget && onClose()}
       >
         <div style={S.modal}>
+          {/* Accent bar */}
+          <div
+            style={{
+              height: "2px",
+              background: "linear-gradient(90deg, #5b8ef7, #7c5bf7)",
+              borderRadius: "2px",
+              margin: "-0.25rem 0 0",
+            }}
+          />
           {/* Header */}
           <div style={S.header}>
             <h2 style={S.title}>
@@ -1102,55 +1149,57 @@ export function EventFormModal({
             </div>
           )}
 
-          {/* Ganztag-Toggle */}
-          <label style={S.toggle}>
-            <input
-              type="checkbox"
-              style={S.toggleCheckbox}
-              checked={allDay}
-              onChange={handleAllDayToggle}
-            />
-            <span style={S.toggleLabel}>Ganztägig</span>
-          </label>
-
-          {/* Start / Ende */}
-          <div style={S.row}>
-            <div style={S.field}>
-              <label style={S.label}>Von</label>
-              <DateTimeField
-                value={startStr}
-                allDay={allDay}
-                onChange={handleStartChange}
-              />
+          {/* Datum/Zeit-Sektion */}
+          <div style={S.dateSection}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "0.125rem",
+              }}
+            >
+              <span style={{ ...S.label, margin: 0 }}>Datum & Zeit</span>
+              <label style={S.toggleInline}>
+                <input
+                  type="checkbox"
+                  style={S.toggleCheckbox}
+                  checked={allDay}
+                  onChange={handleAllDayToggle}
+                />
+                <span style={S.toggleLabelSmall}>Ganztägig</span>
+              </label>
             </div>
-            <div style={S.field}>
-              <label style={S.label}>Bis</label>
-              <DateTimeField
-                value={endStr}
-                allDay={allDay}
-                min={startStr.slice(0, 10)}
-                onChange={setEndStr}
-              />
+            <div style={S.dateRow}>
+              <span style={S.dateLabel}>Von</span>
+              <div style={{ flex: 1 }}>
+                <DateTimeField
+                  value={startStr}
+                  allDay={allDay}
+                  onChange={handleStartChange}
+                />
+              </div>
+            </div>
+            <div style={S.dateRow}>
+              <span style={S.dateLabel}>Bis</span>
+              <div style={{ flex: 1 }}>
+                <DateTimeField
+                  value={endStr}
+                  allDay={allDay}
+                  min={startStr.slice(0, 10)}
+                  onChange={setEndStr}
+                />
+              </div>
             </div>
           </div>
 
           {/* Wiederholung */}
-          <div style={S.divider} />
           <div style={S.field}>
             <label style={S.label}>Wiederholung</label>
             <div style={S.recurBox}>
               <div style={S.recurRow}>
                 <div style={S.field}>
-                  <label
-                    style={{
-                      ...S.label,
-                      textTransform: "none",
-                      letterSpacing: 0,
-                      fontSize: "0.75rem",
-                    }}
-                  >
-                    Häufigkeit
-                  </label>
+                  <label style={S.sublabel}>Häufigkeit</label>
                   <select
                     style={S.select}
                     value={recurFreq}
@@ -1170,16 +1219,7 @@ export function EventFormModal({
 
                 {recurFreq !== "none" && (
                   <div style={S.field}>
-                    <label
-                      style={{
-                        ...S.label,
-                        textTransform: "none",
-                        letterSpacing: 0,
-                        fontSize: "0.75rem",
-                      }}
-                    >
-                      Endet am (optional)
-                    </label>
+                    <label style={S.sublabel}>Endet am (optional)</label>
                     <DatePicker
                       value={recurUntil}
                       min={startStr.slice(0, 10)}
@@ -1198,7 +1238,6 @@ export function EventFormModal({
               )}
             </div>
           </div>
-          <div style={S.divider} />
 
           {/* Ort */}
           <div style={S.field}>
