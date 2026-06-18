@@ -1,10 +1,10 @@
 import logging
-from datetime import datetime, timezone, date
-from typing import Any
 import zoneinfo
+from datetime import date, datetime, timezone
+from typing import Any
 
-from lxml import etree
 from icalendar import Calendar as ICalendar
+from lxml import etree
 from sqlalchemy.orm import Session
 
 from app.caldav.client import get_principal
@@ -105,8 +105,7 @@ def _multiget_ical(client, cal_url: str, urls: list[str]) -> dict[str, tuple[str
 
     # Build <d:href> elements — use path-only hrefs as CalDAV servers prefer
     hrefs_xml = "\n  ".join(
-        f"<d:href>{url.replace(base_url, '')}</d:href>"
-        for url in urls
+        f"<d:href>{url.replace(base_url, '')}</d:href>" for url in urls
     )
     body = _MULTIGET_TMPL.format(hrefs=hrefs_xml)
 
@@ -202,24 +201,26 @@ def _upsert_event(
         existing.description = description
         existing.raw_ical = raw
     else:
-        db.add(Event(
-            uid=master_uid,
-            calendar_id=cal_url,
-            etag=remote_etag,
-            summary=summary,
-            start=start_dt,
-            end=end_dt,
-            all_day=all_day,
-            rrule=rrule,
-            location=location,
-            description=description,
-            raw_ical=raw,
-        ))
+        db.add(
+            Event(
+                uid=master_uid,
+                calendar_id=cal_url,
+                etag=remote_etag,
+                summary=summary,
+                start=start_dt,
+                end=end_dt,
+                all_day=all_day,
+                rrule=rrule,
+                location=location,
+                description=description,
+                raw_ical=raw,
+            )
+        )
         db.flush()
 
-    db.query(EventOverride).filter(
-        EventOverride.master_uid == master_uid
-    ).delete(synchronize_session=False)
+    db.query(EventOverride).filter(EventOverride.master_uid == master_uid).delete(
+        synchronize_session=False
+    )
 
     for ov_uid, rid_dt, ov_comp in override_components:
         if ov_uid != master_uid:
@@ -233,15 +234,17 @@ def _upsert_event(
         ov_end_raw = ov_comp.get("DTEND")
         ov_end_val = ov_end_raw.dt if ov_end_raw else None
         ov_end_dt, _ = _parse_dt(ov_end_val)
-        db.add(EventOverride(
-            master_uid=master_uid,
-            recurrence_id=rid_norm,
-            start=ov_start_dt,
-            end=ov_end_dt,
-            summary=str(ov_comp.get("SUMMARY", "")) or None,
-            location=str(ov_comp.get("LOCATION", "")) or None,
-            description=str(ov_comp.get("DESCRIPTION", "")) or None,
-        ))
+        db.add(
+            EventOverride(
+                master_uid=master_uid,
+                recurrence_id=rid_norm,
+                start=ov_start_dt,
+                end=ov_end_dt,
+                summary=str(ov_comp.get("SUMMARY", "")) or None,
+                location=str(ov_comp.get("LOCATION", "")) or None,
+                description=str(ov_comp.get("DESCRIPTION", "")) or None,
+            )
+        )
 
 
 def _sync_calendar(db: Session, caldav_calendar) -> None:
@@ -252,6 +255,7 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
     ctag = None
     try:
         from caldav.elements import dav
+
         props = caldav_calendar.get_properties([dav.GetCTag()])
         ctag = str(props.get("{http://calendarserver.org/ns/}getctag", "")) or None
     except Exception:
@@ -262,6 +266,7 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
         color = None
         try:
             from caldav.elements import cdav
+
             props = caldav_calendar.get_properties([cdav.CalendarColor()])
             color = props.get("{http://apple.com/ns/ical/}calendar-color")
         except Exception:
@@ -310,7 +315,9 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
 
     logger.info(
         "Calendar %s: %d unchanged, %d to fetch",
-        db_cal.name, len(unchanged_etags), len(urls_to_fetch),
+        db_cal.name,
+        len(unchanged_etags),
+        len(urls_to_fetch),
     )
 
     # ── 4. MULTIGET — nur neue/geänderte URLs, 1 Request ─────────────────────
@@ -324,7 +331,9 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
             return
 
         for obj_url, (remote_etag, raw) in fetched.items():
-            _upsert_event(db, cal_url, remote_etag, raw, obj_url, local_events, seen_uids)
+            _upsert_event(
+                db, cal_url, remote_etag, raw, obj_url, local_events, seen_uids
+            )
 
     # Unveränderte Events als "gesehen" markieren (nicht löschen!)
     for etag in unchanged_etags:
@@ -337,9 +346,9 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
     for uid, event in local_events.items():
         if uid not in seen_uids:
             logger.info("Deleting removed event: %s", uid)
-            db.query(EventOverride).filter(
-                EventOverride.master_uid == uid
-            ).delete(synchronize_session=False)
+            db.query(EventOverride).filter(EventOverride.master_uid == uid).delete(
+                synchronize_session=False
+            )
             db.delete(event)
             deleted_count += 1
 
@@ -349,7 +358,9 @@ def _sync_calendar(db: Session, caldav_calendar) -> None:
     db.commit()
     logger.info(
         "Sync complete for %s: %d fetched, %d deleted",
-        db_cal.name, len(urls_to_fetch), deleted_count,
+        db_cal.name,
+        len(urls_to_fetch),
+        deleted_count,
     )
 
 
