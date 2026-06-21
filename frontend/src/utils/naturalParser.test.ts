@@ -353,6 +353,57 @@ describe("new: location with articles", () => {
 // 3. Original failing example from user
 // ═══════════════════════════════════════════════════════════════════════════
 
+describe("new: hyphen time ranges", () => {
+  it("8-12", () => {
+    const r = parseNaturalEvent("morgen 8-12 Meeting");
+    expect(startTime(r)).toBe("08:00");
+    expect(endTime(r)).toBe("12:00");
+  });
+
+  it("8:30-12:00", () => {
+    const r = parseNaturalEvent("morgen 8:30-12:00 Workshop");
+    expect(startTime(r)).toBe("08:30");
+    expect(endTime(r)).toBe("12:00");
+  });
+
+  it("14-16", () => {
+    const r = parseNaturalEvent("Freitag 14-16 Sport");
+    expect(startTime(r)).toBe("14:00");
+    expect(endTime(r)).toBe("16:00");
+    expect(r!.summary).toBe("Sport");
+  });
+
+  it("9-17 Uhr", () => {
+    const r = parseNaturalEvent("morgen 9-17 Uhr Arbeit");
+    expect(startTime(r)).toBe("09:00");
+    expect(endTime(r)).toBe("17:00");
+  });
+});
+
+describe("new: explicit date priority over weekday", () => {
+  it("Do 25.6 uses the explicit date", () => {
+    const r = parseNaturalEvent("Frühdienst Do 25.6 8-12");
+    expect(date(r)).toBe("2026-06-25");
+    expect(r!.summary).toBe("Frühdienst");
+  });
+
+  it("Mi 1.7 uses explicit date even if not a Wednesday", () => {
+    // 2026-07-01 is a Wednesday, but the point is the explicit date wins
+    const r = parseNaturalEvent("Mi 1.7 Meeting");
+    expect(date(r)).toBe("2026-07-01");
+  });
+});
+
+describe("user's second failing input", () => {
+  it("Frühdienst Do 25.6 8-12", () => {
+    const r = parseNaturalEvent("Frühdienst Do 25.6 8-12");
+    expect(date(r)).toBe("2026-06-25");
+    expect(startTime(r)).toBe("08:00");
+    expect(endTime(r)).toBe("12:00");
+    expect(r!.summary).toBe("Frühdienst");
+  });
+});
+
 describe("user's original failing input", () => {
   it("am 24.06 von 10 bis 12 Hausarbeit", () => {
     const r = parseNaturalEvent("am 24.06 von 10 bis 12 Hausarbeit");
