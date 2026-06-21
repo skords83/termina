@@ -17,18 +17,20 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.db.models import Base, Calendar, Event
 from app.db.session import get_db
 from app.main import app
 
 # --------------------------------------------------------------------------- #
-# Test DB setup – shared in-memory DB via same connection
+# Test DB setup – StaticPool stellt sicher dass alle Verbindungen dieselbe
+# In-Memory-DB sehen (sqlite:///:memory: öffnet sonst pro Verbindung eine neue)
 # --------------------------------------------------------------------------- #
-TEST_DB_URL = "sqlite:///file::testmemory:?uri=true&cache=shared"
 engine = create_engine(
-    TEST_DB_URL,
-    connect_args={"check_same_thread": False, "uri": True},
+    "sqlite:///:memory:",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
 )
 TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(bind=engine)
@@ -42,11 +44,7 @@ def override_get_db():
         db.close()
 
 
-app.dependency_overrides[get_db] = override_get_db
-# Also override the DATABASE_URL used by the lifespan create_tables call
 import app.db.session as _db_session
-_db_session.engine = engine
-_db_session.SessionLocal = TestingSession
 
 AUTH = {"Authorization": "Bearer secret"}
 
@@ -55,8 +53,13 @@ AUTH = {"Authorization": "Bearer secret"}
 # Fixtures
 # --------------------------------------------------------------------------- #
 @pytest.fixture()
-def client():
-    """Fresh TestClient per test; lifespan runs but won't re-create tables."""
+def client(monkeypatch):
+    """Fresh TestClient per test mit isolierter DB und ohne CalDAV-Calls."""
+    monkeypatch.setitem(app.dependency_overrides, get_db, override_get_db)
+    monkeypatch.setattr(_db_session, "engine", engine)
+    monkeypatch.setattr(_db_session, "SessionLocal", TestingSession)
+    monkeypatch.setattr("app.caldav.sync.run_sync", lambda: None)
+    monkeypatch.setattr("app.scheduler.run_sync", lambda: None)
     with TestClient(app) as c:
         yield c
 
@@ -96,7 +99,7 @@ def seed_db():
 # --------------------------------------------------------------------------- #
 def test_calendars_no_auth(client):
     r = client.get("/api/calendars")
-    assert r.status_code == 422  # missing Header → validation error
+    assert r.status_code == 401  # fehlender/ungültiger Token → Unauthorized
 
 
 def test_calendars_wrong_token(client):

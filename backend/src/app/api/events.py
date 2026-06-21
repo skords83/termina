@@ -1,7 +1,27 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, date as date_cls
 from typing import Optional, Literal
+from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
+
+_BERLIN = ZoneInfo("Europe/Berlin")
+
+
+def _dt_to_iso(dt: datetime | None, all_day: bool) -> str | None:
+    """Serialisiert ein DB-Datetime als timezone-aware ISO-String.
+
+    All-Day: nur Datum ("YYYY-MM-DD") — kein Uhrzeit-Anteil.
+    Timed: Berlin-Offset anfügen ("+02:00"/"+01:00"), damit der Client
+    die Zeit korrekt anzeigt, unabhängig von seiner lokalen Timezone.
+    """
+    if dt is None:
+        return None
+    if all_day:
+        return dt.strftime("%Y-%m-%d")
+    return dt.replace(tzinfo=_BERLIN).isoformat()
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -114,14 +134,14 @@ def expand_rrule_event(
                     "uid": event.uid,
                     "calendar_id": event.calendar_id,
                     "summary": override.summary or event.summary,
-                    "start": ov_start,
-                    "end": ov_end,
+                    "start": _dt_to_iso(ov_start, event.all_day),
+                    "end": _dt_to_iso(ov_end, event.all_day),
                     "all_day": event.all_day,
                     "location": override.location if override.location is not None else event.location,
                     "etag": event.etag,
                     "description": override.description if override.description is not None else event.description,
                     "is_recurring": True,
-                    "recurrence_id": inst,
+                    "recurrence_id": inst.isoformat(),
                     "rrule": event.rrule,
                 })
             else:
@@ -134,33 +154,39 @@ def expand_rrule_event(
                     "uid": event.uid,
                     "calendar_id": event.calendar_id,
                     "summary": event.summary,
-                    "start": inst_start,
-                    "end": inst_end,
+                    "start": _dt_to_iso(inst_start, event.all_day),
+                    "end": _dt_to_iso(inst_end, event.all_day),
                     "all_day": event.all_day,
                     "location": event.location,
                     "etag": event.etag,
                     "description": event.description,
                     "is_recurring": True,
-                    "recurrence_id": inst,
+                    "recurrence_id": inst.isoformat(),
                     "rrule": event.rrule,
                 })
 
         return result
 
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "RRULE-Expansion fehlgeschlagen für Event %s (%r): %s — liefere Master-Event als Fallback",
+            event.uid,
+            event.rrule,
+            exc,
+        )
         if event.start is not None and event.start < to and (event.end is None or event.end > from_):
             return [{
                 "uid": event.uid,
                 "calendar_id": event.calendar_id,
                 "summary": event.summary,
-                "start": event.start,
-                "end": event.end,
+                "start": _dt_to_iso(event.start, event.all_day),
+                "end": _dt_to_iso(event.end, event.all_day),
                 "all_day": event.all_day,
                 "location": event.location,
                 "etag": event.etag,
                 "description": event.description,
                 "is_recurring": True,
-                "recurrence_id": event.start,
+                "recurrence_id": event.start.isoformat() if event.start else None,
                 "rrule": event.rrule,
             }]
         return []
@@ -199,7 +225,10 @@ def get_events(
         q.filter(Event.rrule.is_(None), Event.start < to, Event.end > from_)
         .all()
     )
-    rrule_events = q.filter(Event.rrule.isnot(None)).all()
+    rrule_events = q.filter(
+        Event.rrule.isnot(None),
+        Event.start < to,  # Events die nach dem Fenster starten, haben keine Instanzen darin
+    ).all()
 
     result = []
 
@@ -208,8 +237,8 @@ def get_events(
             "uid": e.uid,
             "calendar_id": e.calendar_id,
             "summary": e.summary,
-            "start": e.start,
-            "end": e.end,
+            "start": _dt_to_iso(e.start, e.all_day),
+            "end": _dt_to_iso(e.end, e.all_day),
             "all_day": e.all_day,
             "location": e.location,
             "etag": e.etag,

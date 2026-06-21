@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -24,6 +24,10 @@ class Calendar(Base):
 
 class Event(Base):
     __tablename__ = "events"
+    __table_args__ = (
+        Index("ix_events_calendar_start_end", "calendar_id", "start", "end"),
+        Index("ix_events_start", "start"),
+    )
 
     uid: Mapped[str] = mapped_column(String, primary_key=True)
     calendar_id: Mapped[str] = mapped_column(

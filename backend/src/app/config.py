@@ -8,8 +8,13 @@ class Settings(BaseSettings):
     sync_interval_seconds: int = 300
     api_token: str
     database_url: str = "sqlite:///./termina.db"
+    cors_origins: list[str] = ["http://localhost:5173"]
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "env_parse_none_str": "",
+    }
 
 
 settings = Settings()

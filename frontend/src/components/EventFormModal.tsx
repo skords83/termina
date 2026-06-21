@@ -52,22 +52,27 @@ const FREQ_LABELS: Record<RecurFreq, string> = {
 function parseRrule(rrule: string | null | undefined): {
   freq: RecurFreq;
   until: string;
+  extraParts: string;
 } {
-  if (!rrule) return { freq: "none", until: "" };
+  if (!rrule) return { freq: "none", until: "", extraParts: "" };
   const freqMatch = rrule.match(/FREQ=([A-Z]+)/);
   const untilMatch = rrule.match(/UNTIL=(\d{8}(?:T\d{6}Z?)?)/);
   const freq = (freqMatch?.[1] ?? "none") as RecurFreq;
-  let until = "";
-  if (untilMatch) {
-    const raw = untilMatch[1].slice(0, 8);
-    until = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
-  }
-  return { freq, until };
+  const rawUntil = untilMatch?.[1] ?? "";
+  const until = rawUntil
+    ? `${rawUntil.slice(0, 4)}-${rawUntil.slice(4, 6)}-${rawUntil.slice(6, 8)}`
+    : "";
+  const extraParts = rrule
+    .split(";")
+    .filter((p) => !p.startsWith("FREQ=") && !p.startsWith("UNTIL="))
+    .join(";");
+  return { freq, until, extraParts };
 }
 
-function buildRrule(freq: RecurFreq, until: string): string | null {
+function buildRrule(freq: RecurFreq, until: string, extraParts: string): string | null {
   if (freq === "none") return null;
   let s = `FREQ=${freq}`;
+  if (extraParts) s += `;${extraParts}`;
   if (until) {
     const compact = until.replace(/-/g, "");
     s += `;UNTIL=${compact}T235959Z`;
@@ -945,6 +950,7 @@ export function EventFormModal({
   const initialRrule = parseRrule(existingEvent?.rrule);
   const [recurFreq, setRecurFreq] = useState<RecurFreq>(initialRrule.freq);
   const [recurUntil, setRecurUntil] = useState(initialRrule.until);
+  const [recurExtraParts, setRecurExtraParts] = useState(initialRrule.extraParts);
 
   const summaryRef = useRef<HTMLInputElement>(null);
 
@@ -992,7 +998,7 @@ export function EventFormModal({
     all_day: allDay,
     location: location.trim() || null,
     description: description.trim() || null,
-    rrule: buildRrule(recurFreq, recurUntil),
+    rrule: buildRrule(recurFreq, recurUntil, recurExtraParts),
   });
 
   const handleSubmit = useCallback(async () => {
@@ -1206,6 +1212,7 @@ export function EventFormModal({
                     onChange={(e) => {
                       setRecurFreq(e.target.value as RecurFreq);
                       if (e.target.value === "none") setRecurUntil("");
+                      setRecurExtraParts("");
                     }}
                     disabled={editScope === "single"}
                   >

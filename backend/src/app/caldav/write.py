@@ -47,8 +47,8 @@ def _find_caldav_event(cal, uid: str):
         results = cal.search(uid=uid, event=True, expand=False)
         if results:
             return results[0]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("cal.search() fehlgeschlagen, falle auf Iteration zurück: %s", e)
 
     for obj in cal.objects(load_objects=True):
         try:
@@ -57,7 +57,8 @@ def _find_caldav_event(cal, uid: str):
                 if component.name == "VEVENT":
                     if str(component.get("uid", "")) == uid:
                         return obj
-        except Exception:
+        except Exception as e:
+            logger.warning("Konnte CalDAV-Objekt nicht parsen (übersprungen): %s", e)
             continue
     return None
 

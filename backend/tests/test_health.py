@@ -17,5 +17,5 @@ def test_root() -> None:
     response = client.get("/")
     assert response.status_code == 200
     body = response.json()
-    assert body["name"] == "Termina API"
-    assert "version" in body
+    assert body["service"] == "Termina backend"
+    assert "docs" in body

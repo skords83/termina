@@ -11,6 +11,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 
 from app.main import app
@@ -22,7 +23,7 @@ from app.config import settings
 # ── In-Memory-DB für Tests ────────────────────────────────────────────────────
 
 TEST_DB_URL = "sqlite:///:memory:"
-engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
+engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": False}, poolclass=StaticPool)
 TestingSessionLocal = sessionmaker(bind=engine)
 
 
@@ -32,9 +33,6 @@ def override_get_db():
         yield db
     finally:
         db.close()
-
-
-app.dependency_overrides[get_db] = override_get_db
 
 
 @pytest.fixture(autouse=True)
@@ -69,7 +67,10 @@ def setup_db():
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    monkeypatch.setitem(app.dependency_overrides, get_db, override_get_db)
+    monkeypatch.setattr("app.caldav.sync.run_sync", lambda: None)
+    monkeypatch.setattr("app.scheduler.run_sync", lambda: None)
     return TestClient(app)
 
 
@@ -102,8 +103,7 @@ def test_put_event_ohne_token(client):
 
 
 def test_delete_event_ohne_token(client):
-    r = client.delete("/api/events/existing-uid-1234",
-                      json={"etag": '"etag-abc"'})
+    r = client.delete("/api/events/existing-uid-1234", params={"etag": '"etag-abc"'})
     assert r.status_code == 401
 
 
@@ -236,16 +236,22 @@ def test_put_event_konflikt(client, auth):
 def test_delete_event_erfolgreich(client, auth):
     with patch("app.api.events.delete_event") as mock_del, \
          patch("app.api.events.run_sync"):
-        r = client.delete("/api/events/existing-uid-1234", headers=auth,
-                          json={"etag": '"etag-abc"'})
+        r = client.delete(
+            "/api/events/existing-uid-1234",
+            params={"etag": '"etag-abc"'},
+            headers=auth,
+        )
 
     assert r.status_code == 204
     mock_del.assert_called_once()
 
 
 def test_delete_event_nicht_gefunden(client, auth):
-    r = client.delete("/api/events/unknown-uid", headers=auth,
-                      json={"etag": '"etag-x"'})
+    r = client.delete(
+        "/api/events/unknown-uid",
+        params={"etag": '"etag-x"'},
+        headers=auth,
+    )
     assert r.status_code == 404
 
 
@@ -253,8 +259,11 @@ def test_delete_event_konflikt(client, auth):
     from app.caldav.write import ConflictError as CE
 
     with patch("app.api.events.delete_event", side_effect=CE("Konflikt")):
-        r = client.delete("/api/events/existing-uid-1234", headers=auth,
-                          json={"etag": '"etag-veraltet"'})
+        r = client.delete(
+            "/api/events/existing-uid-1234",
+            params={"etag": '"etag-veraltet"'},
+            headers=auth,
+        )
 
     assert r.status_code == 409
 

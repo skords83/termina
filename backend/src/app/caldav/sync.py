@@ -407,6 +407,7 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
     Nextcloud liefert diese Events nicht per PROPFIND/REPORT,
     daher holen wir das ICS direkt von der Quell-URL.
     """
+    import urllib.error
     import urllib.request
 
     cal_url = cal_info["url"]
@@ -457,7 +458,18 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw_ics = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        logger.error(
+            "HTTP %d fetching subscribed ICS for %s: %s", exc.code, db_cal.name, exc
+        )
+        if exc.code in (403, 404, 410):
+            # Permanenter Fehler — ctag setzen damit der nächste Sync nicht blind wiederholt
+            db_cal.ctag = ctag
+            db_cal.last_synced_at = datetime.now(timezone.utc)
+            db.commit()
+        return
     except Exception as exc:
+        # Transienter Fehler (Timeout, Netzwerk) — kein ctag-Update, beim nächsten Intervall retry
         logger.error("Failed to fetch subscribed ICS for %s: %s", db_cal.name, exc)
         return
 
@@ -466,6 +478,10 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
         ical = ICalendar.from_ical(raw_ics)
     except Exception as exc:
         logger.error("Failed to parse ICS for %s: %s", db_cal.name, exc)
+        # Kaputtes ICS ist kein transienter Fehler — ctag setzen bis die Quelle sich ändert
+        db_cal.ctag = ctag
+        db_cal.last_synced_at = datetime.now(timezone.utc)
+        db.commit()
         return
 
     local_events: dict[str, Event] = {
@@ -509,13 +525,13 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
             existing.rrule = rrule
             existing.location = location
             existing.description = description
-            existing.etag = ctag or ""
+            existing.etag = None
         else:
             db.add(
                 Event(
                     uid=uid,
                     calendar_id=cal_url,
-                    etag=ctag or "",
+                    etag=None,
                     summary=summary,
                     start=start_dt,
                     end=end_dt,
