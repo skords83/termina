@@ -145,9 +145,9 @@ function NaturalInputBar({
         ) : (
           <div className="natural-hints">
             <span className="natural-hint">„Morgen 14 Uhr Zahnarzt"</span>
-            <span className="natural-hint">„Freitag 18 Uhr Abendessen im Vapiano"</span>
-            <span className="natural-hint">„Am 15.7. ganztägig Betriebsausflug"</span>
-            <span className="natural-hint">„Nächsten Montag von 10 bis 12 Uhr Meeting"</span>
+            <span className="natural-hint">„Am 24.06 von 10 bis 12 Hausarbeit"</span>
+            <span className="natural-hint">„Freitag abends Kino"</span>
+            <span className="natural-hint">„Nächste Woche Montag ab 9 Uhr Meeting 2 Stunden"</span>
           </div>
         )}
 

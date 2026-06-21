@@ -1,8 +1,20 @@
 /**
- * parseNaturalEvent  –  v2
+ * parseNaturalEvent  –  v3
  *
  * Parst deutschsprachige Fließtext-Eingaben zu CalDAV-Event-Feldern.
  * Kein KI-Einsatz – reine Regex/Heuristik.
+ *
+ * v3 Erweiterungen:
+ *  12. Punkt-Datum ohne trailing Punkt (24.06 neben 24.06.)
+ *  13. "am" als Datumspräfix (am Montag, am 24.06)
+ *  14. "nächste Woche Freitag" korrekt geparst
+ *  15. "diesen/kommenden" + Wochentag
+ *  16. Tageszeiten: morgens, mittags, nachmittags, abends, nachts
+ *  17. "ab" als Startzeit-Marker
+ *  18. Dauer statt Endzeit (2 Stunden, 90 Minuten)
+ *  19. Relative Zeiten (in 30 Minuten, in 2 Stunden)
+ *  20. Zeitbereich ohne "von" (10 bis 12)
+ *  21. Location mit Artikeln (in der Bibliothek)
  *
  * v2 Fixes:
  *  1. Unicode-aware Wortgrenzen (Umlaute brechen \b nicht mehr)
@@ -51,6 +63,12 @@ function addHours(d: Date, h: number): Date {
   return r;
 }
 
+function addMinutes(d: Date, m: number): Date {
+  const r = new Date(d);
+  r.setMinutes(r.getMinutes() + m);
+  return r;
+}
+
 function setTime(d: Date, hours: number, minutes: number): Date {
   const r = new Date(d);
   r.setHours(hours, minutes, 0, 0);
@@ -66,12 +84,6 @@ function escapeRegExp(s: string): string {
 }
 
 // ─── Unicode-aware Wortgrenzen für Deutsch ───────────────────────────────────
-//
-// JavaScript's \b behandelt ä, ö, ü, ß als Nicht-Wortzeichen.
-// Dadurch matcht z.B. \bfr\b fälschlicherweise in "Frühdienst",
-// weil \b zwischen 'r' und 'ü' feuert.
-//
-// Diese Lookbehind/Lookahead-Konstrukte respektieren deutsche Buchstaben.
 
 const NLB = "(?<![a-zA-ZäöüÄÖÜß])";   // Not Letter Before
 const NLA = "(?![a-zA-ZäöüÄÖÜß])";    // Not Letter After
@@ -107,8 +119,20 @@ const WEEKDAY_MAP: Record<string, number> = {
   sonntag: 0, so: 0,
 };
 
-// Schnelles Lookup für Location-Blacklist
 const WEEKDAY_NAMES = new Set(Object.keys(WEEKDAY_MAP));
+
+// ─── Tageszeiten-Map ─────────────────────────────────────────────────────────
+
+const DAY_PART_MAP: Record<string, number> = {
+  morgens: 8,
+  vormittags: 10,
+  mittags: 12,
+  nachmittags: 14,
+  abends: 18,
+  nachts: 22,
+};
+
+const DAY_PART_KEYS = Object.keys(DAY_PART_MAP).join("|");
 
 // ─── Datum erkennen ───────────────────────────────────────────────────────────
 
@@ -128,9 +152,9 @@ function resolveDate(input: string): DateResult | null {
     return { date: new Date(today), consumed: heuteM[1] };
   }
 
-  // ── "morgen" — aber NICHT "guten morgen" (Begrüßung) ──
+  // ── "morgen" — aber NICHT "guten morgen" (Begrüßung) und NICHT "morgens" (Tageszeit) ──
   const morgenRe = new RegExp(`${NLB}(morgen)${NLA}`);
-  if (morgenRe.test(lower) && !/\bguten?\s+morgen\b/i.test(input)) {
+  if (morgenRe.test(lower) && !/\bguten?\s+morgen\b/i.test(input) && !/\bmorgens\b/i.test(input)) {
     const m = lower.match(morgenRe);
     if (m) return { date: addDays(today, 1), consumed: m[1] };
   }
@@ -141,7 +165,26 @@ function resolveDate(input: string): DateResult | null {
     return { date: addDays(today, 2), consumed: ueberM[1] };
   }
 
-  // ── "nächsten Montag" / "nächste Woche Freitag" ──
+  // ── "nächste Woche Freitag" / "nächste Woche Mo" ──
+  const nextWeekWdRe = new RegExp(
+    `(n[äa]chste(?:[ns]?)?\\s+woche\\s+)(${WEEKDAY_ALL})${NLA}`
+  );
+  const nextWeekWd = lower.match(nextWeekWdRe);
+  if (nextWeekWd) {
+    const target = WEEKDAY_MAP[nextWeekWd[2]];
+    if (target !== undefined) {
+      const d = new Date(today);
+      // Springe zum Montag der nächsten Woche, dann zum Ziel-Tag
+      const daysUntilNextMonday = ((1 - d.getDay()) + 7) % 7 || 7;
+      d.setDate(d.getDate() + daysUntilNextMonday);
+      // Vom Montag der nächsten Woche zum Ziel-Tag
+      const daysFromMonday = ((target - 1) + 7) % 7;
+      d.setDate(d.getDate() + daysFromMonday);
+      return { date: d, consumed: nextWeekWd[0] };
+    }
+  }
+
+  // ── "nächsten Montag" / "nächste Woche Freitag" (ohne "Woche") ──
   const nextWdRe = new RegExp(
     `(n[äa]chste[ns]?\\s+)(${WEEKDAY_ALL})${NLA}`
   );
@@ -157,8 +200,27 @@ function resolveDate(input: string): DateResult | null {
     }
   }
 
-  // ── Einzelner Wochentag mit Unicode-Grenzen ──
-  const wdRe = new RegExp(`${NLB}(${WEEKDAY_ALL})${NLA}`);
+  // ── "diesen Mittwoch" / "kommenden Freitag" ──
+  const diesenRe = new RegExp(
+    `((?:diese[nmrs]?|kommende[nmrs]?)\\s+)(${WEEKDAY_ALL})${NLA}`
+  );
+  const diesenM = lower.match(diesenRe);
+  if (diesenM) {
+    const target = WEEKDAY_MAP[diesenM[2]];
+    if (target !== undefined) {
+      const d = new Date(today);
+      if (d.getDay() === target) {
+        // "diesen Montag" am Montag = heute
+        return { date: d, consumed: diesenM[0] };
+      }
+      d.setDate(d.getDate() + 1);
+      while (d.getDay() !== target) d.setDate(d.getDate() + 1);
+      return { date: d, consumed: diesenM[0] };
+    }
+  }
+
+  // ── Einzelner Wochentag, optional mit "am" davor ──
+  const wdRe = new RegExp(`(?:am\\s+)?${NLB}(${WEEKDAY_ALL})${NLA}`);
   const wdM = lower.match(wdRe);
   if (wdM) {
     const target = WEEKDAY_MAP[wdM[1]];
@@ -174,11 +236,13 @@ function resolveDate(input: string): DateResult | null {
     }
   }
 
-  // ── Punkt-Datum: zwingend Punkt NACH dem Monat ──
-  // Matcht: "15.7." "15.07." "15.07.2026" — NICHT "8.30" (das ist eine Uhrzeit)
-  // Zusätzlich Monats-Validierung (1-12)
+  // ── Punkt-Datum: trailing Punkt optional ──
+  // Matcht: "24.06" "24.06." "15.07." "15.07.2026" — NICHT "8.30" (Uhrzeit)
+  // Disambiguierung: dd.mm ohne trailing Punkt nur wenn Monat 1-12 UND
+  // nicht gefolgt von weiterer Ziffer (sonst wäre es eine Dezimalzahl)
+  // Optional "am " davor für bessere Erkennung
   const dotDate = lower.match(
-    /\b(\d{1,2})\.(\d{1,2})\.(?:\s*(\d{4}))?/
+    /(?:am\s+)?(\d{1,2})\.(\d{1,2})\.(?:\s*(\d{4}))?/
   );
   if (dotDate) {
     const day = parseInt(dotDate[1]);
@@ -190,6 +254,24 @@ function resolveDate(input: string): DateResult | null {
       if (!isNaN(d.getTime())) {
         if (d < today && !dotDate[3]) d.setFullYear(d.getFullYear() + 1);
         return { date: d, consumed: dotDate[0] };
+      }
+    }
+  }
+
+  // ── Punkt-Datum OHNE trailing Punkt: "24.06", "5.7" ──
+  // Nur matchen wenn NICHT gefolgt von Ziffer (sonst Dezimalzahl/Uhrzeit)
+  const dotDateNoTrail = lower.match(
+    /(?:am\s+)?(\d{1,2})\.(\d{1,2})(?![.\d])/
+  );
+  if (dotDateNoTrail) {
+    const day = parseInt(dotDateNoTrail[1]);
+    const monthNum = parseInt(dotDateNoTrail[2]);
+    if (monthNum >= 1 && monthNum <= 12 && day >= 1 && day <= 31) {
+      const month = monthNum - 1;
+      const d = new Date(today.getFullYear(), month, day);
+      if (!isNaN(d.getTime())) {
+        if (d < today) d.setFullYear(d.getFullYear() + 1);
+        return { date: d, consumed: dotDateNoTrail[0] };
       }
     }
   }
@@ -221,6 +303,30 @@ function resolveDate(input: string): DateResult | null {
   const inWeeks = lower.match(/\bin\s+(\d+)\s+wochen?\b/);
   if (inWeeks) {
     return { date: addDays(today, parseInt(inWeeks[1]) * 7), consumed: inWeeks[0] };
+  }
+
+  return null;
+}
+
+// ─── Relative Zeit erkennen (in X Minuten / in X Stunden) ────────────────────
+
+interface RelativeTimeResult {
+  date: Date;
+  consumed: string;
+}
+
+function resolveRelativeTime(input: string): RelativeTimeResult | null {
+  const lower = input.toLowerCase();
+  const now = new Date();
+
+  const inMinutes = lower.match(/\bin\s+(\d+)\s+min(?:uten?)?\b/);
+  if (inMinutes) {
+    return { date: addMinutes(now, parseInt(inMinutes[1])), consumed: inMinutes[0] };
+  }
+
+  const inHours = lower.match(/\bin\s+(\d+)\s+(?:stunden?|std)\b/);
+  if (inHours) {
+    return { date: addHours(now, parseInt(inHours[1])), consumed: inHours[0] };
   }
 
   return null;
@@ -259,6 +365,44 @@ function resolveTime(input: string): TimeResult | null {
     }
   }
 
+  // ── "9:30 bis 11" / "10 bis 12 Uhr" — Zeitbereich ohne "von" ──
+  const rangeHHMM = lower.match(
+    /\b((\d{1,2})[:\.](\d{2}))\s*(?:uhr)?\s+bis\b/
+  );
+  if (rangeHHMM) {
+    const h = parseInt(rangeHHMM[2]), m = parseInt(rangeHHMM[3]);
+    if (isValidTime(h, m)) {
+      return { hours: h, minutes: m, consumed: rangeHHMM[1] };
+    }
+  }
+
+  const rangeH = lower.match(
+    /\b((\d{1,2}))\s*(?:uhr)?\s+bis\s+\d/
+  );
+  if (rangeH) {
+    const h = parseInt(rangeH[2]);
+    if (isValidTime(h, 0)) {
+      return { hours: h, minutes: 0, consumed: rangeH[1] };
+    }
+  }
+
+  // ── "ab 9:30" / "ab 15 Uhr" — Startzeit mit "ab" ──
+  const abHHMM = lower.match(/\bab\s+(\d{1,2})[:\.](\d{2})\s*(?:uhr)?\b/);
+  if (abHHMM) {
+    const h = parseInt(abHHMM[1]), m = parseInt(abHHMM[2]);
+    if (isValidTime(h, m)) {
+      return { hours: h, minutes: m, consumed: abHHMM[0] };
+    }
+  }
+
+  const abH = lower.match(/\bab\s+(\d{1,2})\s*(?:uhr)?\b/);
+  if (abH) {
+    const h = parseInt(abH[1]);
+    if (isValidTime(h, 0)) {
+      return { hours: h, minutes: 0, consumed: abH[0] };
+    }
+  }
+
   // ── "14:30 Uhr" / "14:30" / "14.30 Uhr" ──
   const hhmm = lower.match(/\b(\d{1,2})[:\.](\d{2})\s*(?:uhr)?\b/);
   if (hhmm) {
@@ -278,8 +422,6 @@ function resolveTime(input: string): TimeResult | null {
   }
 
   // ── "um 9" (mit explizitem "um", ohne "Uhr") ──
-  // Negativer Lookahead: nicht matchen wenn direkt :, . oder Ziffer folgt
-  // (der User hat explizit Minuten angegeben, die aber invalid waren)
   const umHour = lower.match(/\bum\s+(\d{1,2})(?![:\.\d])\b/);
   if (umHour) {
     const h = parseInt(umHour[1]);
@@ -288,6 +430,26 @@ function resolveTime(input: string): TimeResult | null {
     }
   }
 
+  return null;
+}
+
+// ─── Tageszeit erkennen (morgens, mittags, …) ───────────────────────────────
+
+interface DayPartResult {
+  hours: number;
+  consumed: string;
+}
+
+function resolveDayPart(input: string): DayPartResult | null {
+  const lower = input.toLowerCase();
+  const re = new RegExp(`${NLB}(${DAY_PART_KEYS})${NLA}`);
+  const m = lower.match(re);
+  if (m) {
+    const hours = DAY_PART_MAP[m[1]];
+    if (hours !== undefined) {
+      return { hours, consumed: m[1] };
+    }
+  }
   return null;
 }
 
@@ -330,11 +492,49 @@ function resolveEndTime(input: string): EndTimeResult | null {
   return null;
 }
 
+// ─── Dauer erkennen ──────────────────────────────────────────────────────────
+
+interface DurationResult {
+  totalMinutes: number;
+  consumed: string;
+}
+
+function resolveDuration(input: string): DurationResult | null {
+  const lower = input.toLowerCase();
+
+  // "X,Y Stunden" / "X.Y Stunden"
+  const fracHours = lower.match(/\b(\d+)[.,](\d+)\s*(?:stunden?|std|h)\b/);
+  if (fracHours) {
+    const whole = parseInt(fracHours[1]);
+    const frac = parseInt(fracHours[2]);
+    const totalMinutes = whole * 60 + frac * 6; // .5 = 30min, etc.
+    return { totalMinutes, consumed: fracHours[0] };
+  }
+
+  // "X Stunden" / "X Std" / "Xh"
+  const hours = lower.match(/\b(\d+)\s*(?:stunden?|std|h)\b/);
+  if (hours) {
+    return { totalMinutes: parseInt(hours[1]) * 60, consumed: hours[0] };
+  }
+
+  // "X Minuten" / "X Min"
+  const mins = lower.match(/\b(\d+)\s*(?:minuten?|min)\b/);
+  if (mins) {
+    return { totalMinutes: parseInt(mins[1]), consumed: mins[0] };
+  }
+
+  return null;
+}
+
 // ─── Ort erkennen ────────────────────────────────────────────────────────────
 
+const ARTICLES = "(?:der|die|das|dem|den|des|einem|einer|einem|einen)?\\s*";
+
 const LOCATION_TRIGGERS = [
-  // Präposition + Großbuchstabe, stoppt vor Zeitmarkern (um/von/bis/ab + Zahl)
-  /\b(?:im|in|bei|am|an|auf|beim)\s+([A-ZÄÖÜ][^,\.!?]*?)(?:\s+(?:um|von|bis|ab)\s+\d|\s*[,\.!?]|$)/,
+  // Präposition + optionaler Artikel + Großbuchstabe
+  new RegExp(
+    `\\b(?:im|in|bei|am|an|auf|beim)\\s+${ARTICLES}([A-ZÄÖÜ][^,\\.!?]*?)(?:\\s+(?:um|von|bis|ab)\\s+\\d|\\s*[,\\.!?]|$)`
+  ),
   // Komma-basiert: "..., Rathaus"
   /,\s*([A-ZÄÖÜ][^,\.!?]{2,30})(?:\s*[,\.!?]|$)/,
 ];
@@ -344,16 +544,11 @@ function resolveLocation(input: string): string | undefined {
     const m = input.match(re);
     if (m) {
       const loc = m[1].trim();
-      // Überspringen wenn mit Ziffer beginnt
       if (/^\d/.test(loc)) continue;
-      // Überspringen bei sehr kurzen Einzelwörtern (≤2 Zeichen)
       if (loc.split(" ").length === 1 && loc.length < 3) continue;
-      // Überspringen wenn erstes Wort ein Wochentag ist
       const firstWord = loc.split(/\s+/)[0].toLowerCase();
       if (WEEKDAY_NAMES.has(firstWord)) continue;
-      // Überspringen bei Datumswörtern
       if (/^(heute|morgen|übermorgen|nächste[nrs]?|ganztägig)/i.test(firstWord)) continue;
-      // Überspringen bei Monatsnamen
       if (MONTH_MAP[firstWord] !== undefined) continue;
       return loc;
     }
@@ -372,24 +567,27 @@ function isAllDay(input: string): boolean {
 function extractSummary(input: string, consumed: string[]): string {
   let text = input;
 
-  // Consumed Tokens entfernen (case-insensitive)
   for (const c of consumed) {
     if (!c) continue;
     text = text.replace(new RegExp(escapeRegExp(c), "gi"), " ");
   }
 
-  // Füllwörter entfernen
   text = text
     .replace(/\bam\b/gi, " ")
     .replace(/\bum\b/gi, " ")
     .replace(/\bvon\b/gi, " ")
     .replace(/\bbis\b/gi, " ")
+    .replace(/\bab\b/gi, " ")
     .replace(/\bganztägig\b/gi, " ")
     .replace(/\bganztagig\b/gi, " ")
     .replace(/\bjeden?\b/gi, " ")
     .replace(/\bnächste[ns]?\b/gi, " ")
-    .replace(/\bin\s+\d+\s+(?:tagen?|wochen?)\b/gi, " ")
+    .replace(/\bdiese[nmrs]?\b/gi, " ")
+    .replace(/\bkommende[nmrs]?\b/gi, " ")
+    .replace(/\bwoche\b/gi, " ")
+    .replace(/\bin\s+\d+\s+(?:tagen?|wochen?|minuten?|min|stunden?|std)\b/gi, " ")
     .replace(/\buhr\b/gi, " ")
+    .replace(new RegExp(`\\b(?:${DAY_PART_KEYS})\\b`, "gi"), " ")
     .replace(/[,\.!?]+/g, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
@@ -404,6 +602,20 @@ export function parseNaturalEvent(input: string): ParsedEvent | null {
 
   const consumed: string[] = [];
 
+  // 0. Relative Zeit prüfen (in 30 Minuten, in 2 Stunden)
+  const relTime = resolveRelativeTime(input);
+  if (relTime) {
+    consumed.push(relTime.consumed);
+    const endDate = addHours(relTime.date, 1);
+    const summary = extractSummary(input, consumed);
+    return {
+      summary,
+      start: dateToLocalISO(relTime.date),
+      end: dateToLocalISO(endDate),
+      all_day: false,
+    };
+  }
+
   // 1. Datum
   const dateResult = resolveDate(input);
   let baseDate: Date;
@@ -411,8 +623,6 @@ export function parseNaturalEvent(input: string): ParsedEvent | null {
   if (dateResult) {
     baseDate = dateResult.date;
     consumed.push(dateResult.consumed);
-    // Datum-Tokens aus dem Input entfernen damit der Zeit-Parser
-    // sie nicht nochmal matcht (z.B. "15.07." nicht als 15:07)
     inputForTime = input.replace(
       new RegExp(escapeRegExp(dateResult.consumed), "gi"),
       (m) => " ".repeat(m.length),
@@ -436,8 +646,14 @@ export function parseNaturalEvent(input: string): ParsedEvent | null {
     startDate = new Date(baseDate);
     startDate.setHours(0, 0, 0, 0);
   } else {
-    // Keine Zeit gefunden: Default 09:00
-    startDate = setTime(baseDate, 9, 0);
+    // Tageszeit als Fallback (morgens, mittags, …)
+    const dayPart = resolveDayPart(inputForTime);
+    if (dayPart) {
+      startDate = setTime(baseDate, dayPart.hours, 0);
+      consumed.push(dayPart.consumed);
+    } else {
+      startDate = setTime(baseDate, 9, 0);
+    }
   }
 
   // 4. Endzeit (ebenfalls auf bereinigtem Input)
@@ -446,14 +662,18 @@ export function parseNaturalEvent(input: string): ParsedEvent | null {
   if (endTimeResult) {
     endDate = setTime(baseDate, endTimeResult.hours, endTimeResult.minutes);
     consumed.push(endTimeResult.consumed);
-    // Sanity: Ende muss nach Start liegen
     if (endDate <= startDate) endDate = addHours(startDate, 1);
   } else if (allDay) {
-    // Ganztägig: Ende = nächster Tag (iCal exklusiv)
     endDate = addDays(startDate, 1);
   } else {
-    // Default: 1 Stunde
-    endDate = addHours(startDate, 1);
+    // Dauer als Fallback (2 Stunden, 90 Minuten)
+    const duration = resolveDuration(inputForTime);
+    if (duration) {
+      endDate = addMinutes(startDate, duration.totalMinutes);
+      consumed.push(duration.consumed);
+    } else {
+      endDate = addHours(startDate, 1);
+    }
   }
 
   // 5. Ort
