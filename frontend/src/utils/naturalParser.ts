@@ -219,27 +219,9 @@ function resolveDate(input: string): DateResult | null {
     }
   }
 
-  // ── Einzelner Wochentag, optional mit "am" davor ──
-  const wdRe = new RegExp(`(?:am\\s+)?${NLB}(${WEEKDAY_ALL})${NLA}`);
-  const wdM = lower.match(wdRe);
-  if (wdM) {
-    const target = WEEKDAY_MAP[wdM[1]];
-    if (target !== undefined) {
-      const d = new Date(today);
-      if (d.getDay() === target) {
-        d.setDate(d.getDate() + 7);
-      } else {
-        d.setDate(d.getDate() + 1);
-        while (d.getDay() !== target) d.setDate(d.getDate() + 1);
-      }
-      return { date: d, consumed: wdM[0] };
-    }
-  }
-
   // ── Punkt-Datum: trailing Punkt optional ──
   // Matcht: "24.06" "24.06." "15.07." "15.07.2026" — NICHT "8.30" (Uhrzeit)
-  // Disambiguierung: dd.mm ohne trailing Punkt nur wenn Monat 1-12 UND
-  // nicht gefolgt von weiterer Ziffer (sonst wäre es eine Dezimalzahl)
+  // Explizite Daten haben Vorrang vor einzelnen Wochentagen
   // Optional "am " davor für bessere Erkennung
   const dotDate = lower.match(
     /(?:am\s+)?(\d{1,2})\.(\d{1,2})\.(?:\s*(\d{4}))?/
@@ -290,6 +272,24 @@ function resolveDate(input: string): DateResult | null {
         if (d < today && !monthNameDate[3]) d.setFullYear(d.getFullYear() + 1);
         return { date: d, consumed: monthNameDate[0] };
       }
+    }
+  }
+
+  // ── Einzelner Wochentag, optional mit "am" davor ──
+  // Nach expliziten Daten, damit "Do 25.6" das Datum 25.6 bevorzugt
+  const wdRe = new RegExp(`(?:am\\s+)?${NLB}(${WEEKDAY_ALL})${NLA}`);
+  const wdM = lower.match(wdRe);
+  if (wdM) {
+    const target = WEEKDAY_MAP[wdM[1]];
+    if (target !== undefined) {
+      const d = new Date(today);
+      if (d.getDay() === target) {
+        d.setDate(d.getDate() + 7);
+      } else {
+        d.setDate(d.getDate() + 1);
+        while (d.getDay() !== target) d.setDate(d.getDate() + 1);
+      }
+      return { date: d, consumed: wdM[0] };
     }
   }
 
@@ -383,6 +383,28 @@ function resolveTime(input: string): TimeResult | null {
     const h = parseInt(rangeH[2]);
     if (isValidTime(h, 0)) {
       return { hours: h, minutes: 0, consumed: rangeH[1] };
+    }
+  }
+
+  // ── Bindestrich-Zeitbereich: "8-12", "8:30-12:00", "8:30-12" ──
+  const dashRangeHHMM = lower.match(
+    /\b((\d{1,2})[:\.](\d{2}))\s*-\s*\d/
+  );
+  if (dashRangeHHMM) {
+    const h = parseInt(dashRangeHHMM[2]), m = parseInt(dashRangeHHMM[3]);
+    if (isValidTime(h, m)) {
+      return { hours: h, minutes: m, consumed: dashRangeHHMM[1] };
+    }
+  }
+
+  const dashRangeH = lower.match(
+    /\b((\d{1,2}))\s*-\s*(\d{1,2})(?:[:\.](\d{2}))?\s*(?:uhr)?\b/
+  );
+  if (dashRangeH) {
+    const startH = parseInt(dashRangeH[2]);
+    const endH = parseInt(dashRangeH[3]);
+    if (isValidTime(startH, 0) && isValidTime(endH, 0)) {
+      return { hours: startH, minutes: 0, consumed: dashRangeH[1] };
     }
   }
 
@@ -489,6 +511,27 @@ function resolveEndTime(input: string): EndTimeResult | null {
     }
   }
 
+  // ── Bindestrich-Endzeit: "8-12" → Endzeit 12, "8:30-12:00" → 12:00 ──
+  const dashEndFull = lower.match(
+    /\b\d{1,2}(?:[:\.]?\d{0,2})?\s*-\s*((\d{1,2})[:\.](\d{2}))\s*(?:uhr)?\b/
+  );
+  if (dashEndFull) {
+    const h = parseInt(dashEndFull[2]), m = parseInt(dashEndFull[3]);
+    if (isValidTime(h, m)) {
+      return { hours: h, minutes: m, consumed: dashEndFull[1] };
+    }
+  }
+
+  const dashEndH = lower.match(
+    /\b\d{1,2}(?:[:\.]?\d{0,2})?\s*-\s*((\d{1,2}))\s*(?:uhr)?\b/
+  );
+  if (dashEndH) {
+    const h = parseInt(dashEndH[2]);
+    if (isValidTime(h, 0)) {
+      return { hours: h, minutes: 0, consumed: dashEndH[1] };
+    }
+  }
+
   return null;
 }
 
@@ -588,6 +631,11 @@ function extractSummary(input: string, consumed: string[]): string {
     .replace(/\bin\s+\d+\s+(?:tagen?|wochen?|minuten?|min|stunden?|std)\b/gi, " ")
     .replace(/\buhr\b/gi, " ")
     .replace(new RegExp(`\\b(?:${DAY_PART_KEYS})\\b`, "gi"), " ")
+    .replace(new RegExp(`${NLB}(?:${WEEKDAY_ALL})${NLA}`, "gi"), " ")
+    .replace(/\b\d{1,2}(?:[:\.]?\d{0,2})?\s*-\s*\d{1,2}(?:[:\.]?\d{0,2})?\s*(?:uhr)?\b/gi, " ")
+    .replace(/\s+-\s+/g, " ")
+    .replace(/\s+-$/g, " ")
+    .replace(/^-\s+/g, " ")
     .replace(/[,\.!?]+/g, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
