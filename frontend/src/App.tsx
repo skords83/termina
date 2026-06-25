@@ -129,6 +129,40 @@ export default function App() {
     return d;
   });
 
+  // Aktualisiert currentDate automatisch um Mitternacht und nach Suspend/Resume
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout>;
+
+    function scheduleNextMidnight() {
+      const now = new Date();
+      const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      const msUntilMidnight = tomorrow.getTime() - now.getTime();
+      timeout = setTimeout(() => {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        setCurrentDate(d);
+        scheduleNextMidnight();
+      }, msUntilMidnight);
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        setCurrentDate(prev => (prev.getTime() === today.getTime() ? prev : today));
+        clearTimeout(timeout);
+        scheduleNextMidnight();
+      }
+    }
+
+    scheduleNextMidnight();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      clearTimeout(timeout);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
   // Refs für Keyboard-Handler (stabile Referenz ohne Re-Register)
   const viewRef = useRef(view);
   viewRef.current = view;
