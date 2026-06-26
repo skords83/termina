@@ -99,13 +99,38 @@ def _discover_calendars(client: Any) -> list[dict]:
         username = settings.caldav_username
         cal_root = f"{base_url}/calendars/{username}/"
 
-    resp = client.propfind(
-        url=cal_root,
-        props=_DISCOVERY_BODY,
-        depth=1,
+    # PROPFIND direkt über urllib statt client.propfind() — die caldav-Lib würde
+    # OxiClouds ungültigen XML-Namespace-Prefix (<http://apple.com/ns/ical/:calendar-color/>)
+    # intern parsen und dabei abstürzen. Mit urllib + _XML_PARSER(recover=True)
+    # überspringt lxml das fehlerhafte Tag und parst den Rest korrekt.
+    import base64
+    import urllib.error
+    import urllib.request as urlreq
+
+    _credentials = base64.b64encode(
+        f"{settings.caldav_username}:{settings.caldav_password}".encode()
+    ).decode()
+    _req = urlreq.Request(
+        cal_root,
+        data=_DISCOVERY_BODY.encode("utf-8"),
+        method="PROPFIND",
+        headers={
+            "Content-Type": "application/xml; charset=UTF-8",
+            "Depth": "1",
+            "Authorization": f"Basic {_credentials}",
+        },
     )
-    raw_xml = resp.raw if isinstance(resp.raw, bytes) else resp.raw.encode()
-    tree = etree.fromstring(raw_xml)
+    try:
+        with urlreq.urlopen(_req, timeout=30) as _http_resp:
+            raw_xml = _http_resp.read()
+    except urllib.error.HTTPError as exc:
+        logger.error("PROPFIND auf %s fehlgeschlagen: HTTP %d", cal_root, exc.code)
+        return []
+    except Exception as exc:
+        logger.error("PROPFIND auf %s fehlgeschlagen: %s", cal_root, exc)
+        return []
+
+    tree = etree.fromstring(raw_xml, _XML_PARSER)
 
     calendars = []
     for response in tree.findall("d:response", NS):
