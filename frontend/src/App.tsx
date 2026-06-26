@@ -512,8 +512,8 @@ export default function App() {
       }
       if (err?.type === 'conflict') {
         alert('Konflikt: Termin wurde extern geändert. Bitte neu laden.');
-      } else if (err?.type === 'nextcloud_down') {
-        alert('Nextcloud nicht erreichbar.');
+      } else if (err?.type === 'caldav_down') {
+        alert('CalDAV-Server nicht erreichbar.');
       } else if (err?.type === 'bad_request') {
         alert(`Ungültige Anfrage: ${err.message}`);
       } else {
@@ -587,7 +587,7 @@ export default function App() {
             <button
               className={`toolbar-btn${syncing ? ' toolbar-btn--spinning' : ''}`}
               onClick={handleSync}
-              title="Sync mit Nextcloud"
+              title="Sync mit CalDAV-Server"
               disabled={syncing}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">

@@ -61,7 +61,7 @@ export interface MoveEventPayload {
 export type WriteError =
   | { type: 'conflict' }
   | { type: 'not_found' }
-  | { type: 'nextcloud_down' }
+  | { type: 'caldav_down' }
   | { type: 'auth' }
   | { type: 'bad_request'; message: string }
   | { type: 'unknown'; status: number };

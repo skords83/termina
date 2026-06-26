@@ -336,9 +336,9 @@ export function EventPopup({
           "Termin wurde extern geändert – bitte Seite neu laden.",
           "warning",
         );
-      } else if (writeErr.type === "nextcloud_down") {
+      } else if (writeErr.type === "caldav_down") {
         showToast(
-          "Nextcloud nicht erreichbar – Termin konnte nicht gelöscht werden.",
+          "CalDAV-Server nicht erreichbar – Termin konnte nicht gelöscht werden.",
           "error",
         );
       } else {

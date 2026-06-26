@@ -218,7 +218,7 @@ def create_event(
         raise
     except Exception as e:
         if "timeout" in str(e).lower() or "ReadTimeout" in type(e).__name__:
-            raise CalDAVTimeoutError(f"Nextcloud nicht erreichbar: {e}") from e
+            raise CalDAVTimeoutError(f"CalDAV-Server nicht erreichbar: {e}") from e
         raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
 
     return uid
@@ -404,7 +404,7 @@ def move_event(
     except Exception as e:
         logger.exception("move_event(%s) failed", mode)
         if "timeout" in str(e).lower() or "ReadTimeout" in type(e).__name__:
-            raise CalDAVTimeoutError(f"Nextcloud nicht erreichbar: {e}") from e
+            raise CalDAVTimeoutError(f"CalDAV-Server nicht erreichbar: {e}") from e
         raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
 
 

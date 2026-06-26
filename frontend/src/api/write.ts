@@ -31,7 +31,7 @@ function mapError(status: number, body?: any): WriteError {
   if (status === 401) return { type: 'auth' };
   if (status === 404) return { type: 'not_found' };
   if (status === 409) return { type: 'conflict' };
-  if (status === 503) return { type: 'nextcloud_down' };
+  if (status === 503) return { type: 'caldav_down' };
   return { type: 'unknown', status };
 }
 

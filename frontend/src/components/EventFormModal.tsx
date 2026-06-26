@@ -132,8 +132,8 @@ function describeWriteError(err: WriteError): string {
       return "Der Termin wurde zwischenzeitlich extern geändert. Bitte Seite neu laden.";
     case "not_found":
       return "Termin oder Kalender nicht gefunden (404).";
-    case "nextcloud_down":
-      return "Nextcloud ist gerade nicht erreichbar. Bitte später erneut versuchen.";
+    case "caldav_down":
+      return "CalDAV-Server ist gerade nicht erreichbar. Bitte später erneut versuchen.";
     case "auth":
       return "Authentifizierung fehlgeschlagen. Bitte neu einloggen.";
     default:
