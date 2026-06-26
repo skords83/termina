@@ -565,6 +565,120 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
     )
 
 
+def _sync_ics_feed(db: Session, feed: dict) -> None:
+    """Synct einen extern konfigurierten ICS-Feed (read-only, kein CalDAV-Write)."""
+    import hashlib
+    import urllib.error
+    import urllib.request
+
+    url: str = feed["url"]
+    if url.startswith("webcal://"):
+        url = "https://" + url[len("webcal://"):]
+
+    name: str = feed.get("name", url)
+    color: str | None = feed.get("color")
+    feed_id = url
+
+    db_cal = db.get(Calendar, feed_id)
+    if db_cal is None:
+        db_cal = Calendar(id=feed_id, name=name, color=color, ctag=None, last_synced_at=None)
+        db.add(db_cal)
+        db.flush()
+        logger.info("New ICS feed: %s", name)
+    else:
+        db_cal.name = name
+        if color:
+            db_cal.color = color
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Termina/1.0 ICS-Sync"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw_ics = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        logger.error("HTTP %d beim Abruf von ICS-Feed %s: %s", exc.code, name, exc)
+        return
+    except Exception as exc:
+        logger.error("Abruf von ICS-Feed %s fehlgeschlagen: %s", name, exc)
+        return
+
+    content_hash = hashlib.sha256(raw_ics.encode()).hexdigest()[:16]
+    if db_cal.ctag == content_hash:
+        logger.debug("ICS-Feed %s unverändert (Hash-Match), übersprungen.", name)
+        return
+
+    try:
+        ical = ICalendar.from_ical(raw_ics)
+    except Exception as exc:
+        logger.error("ICS-Feed %s konnte nicht geparst werden: %s", name, exc)
+        return
+
+    local_events: dict[str, Event] = {
+        e.uid: e for e in db.query(Event).filter(Event.calendar_id == feed_id).all()
+    }
+    seen_uids: set[str] = set()
+    upserted = 0
+
+    for component in ical.walk("VEVENT"):
+        uid = str(component.get("UID", ""))
+        if not uid or component.get("RECURRENCE-ID") is not None:
+            continue
+
+        seen_uids.add(uid)
+        summary = str(component.get("SUMMARY", "")) or None
+        location = str(component.get("LOCATION", "")) or None
+        description = str(component.get("DESCRIPTION", "")) or None
+        rrule_prop = component.get("RRULE")
+        rrule = str(rrule_prop.to_ical().decode()) if rrule_prop else None
+
+        start_raw = component.get("DTSTART")
+        start_dt, all_day = _parse_dt(start_raw.dt if start_raw else None)
+        end_raw = component.get("DTEND") or component.get("DURATION")
+        end_dt, _ = _parse_dt(end_raw.dt if end_raw else None)
+        all_day = _infer_all_day(start_dt, end_dt, all_day)
+
+        existing = local_events.get(uid)
+        if existing:
+            existing.summary = summary
+            existing.start = start_dt
+            existing.end = end_dt
+            existing.all_day = all_day
+            existing.rrule = rrule
+            existing.location = location
+            existing.description = description
+        else:
+            db.add(Event(
+                uid=uid,
+                calendar_id=feed_id,
+                etag=None,
+                summary=summary,
+                start=start_dt,
+                end=end_dt,
+                all_day=all_day,
+                rrule=rrule,
+                location=location,
+                description=description,
+                raw_ical="",
+            ))
+        upserted += 1
+
+    deleted_count = 0
+    for uid, event in local_events.items():
+        if uid not in seen_uids:
+            db.query(EventOverride).filter(EventOverride.master_uid == uid).delete(
+                synchronize_session=False
+            )
+            db.delete(event)
+            deleted_count += 1
+
+    db_cal.ctag = content_hash
+    db_cal.last_synced_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info(
+        "ICS-Feed-Sync abgeschlossen für %s: %d upserted, %d deleted",
+        name, upserted, deleted_count,
+    )
+
+
 def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
     # Subscribed-Kalender haben einen eigenen Sync-Pfad
     if cal_info.get("subscribed"):
@@ -677,12 +791,13 @@ def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
 
 def run_sync() -> None:
     """Entry point called by APScheduler."""
+    from app.config import settings
+
     logger.info("Starting CalDAV sync run")
     db: Session = SessionLocal()
     try:
         client = get_caldav_client()
 
-        # Eigene Discovery statt principal.calendars() — erfasst auch subscribed
         calendars = _discover_calendars(client)
         remote_urls = {c["url"] for c in calendars}
 
@@ -693,10 +808,23 @@ def run_sync() -> None:
                 logger.error("Error syncing calendar %s: %s", cal_info["url"], exc)
                 db.rollback()
 
-        # Kalender die in Nextcloud gelöscht wurden aus DB entfernen
+        # ICS-Feeds aus Konfiguration
+        ics_feed_ids: set[str] = set()
+        for feed in settings.ics_feeds:
+            url = feed.get("url", "")
+            if url.startswith("webcal://"):
+                url = "https://" + url[len("webcal://"):]
+            ics_feed_ids.add(url)
+            try:
+                _sync_ics_feed(db, {**feed, "url": url})
+            except Exception as exc:
+                logger.error("Error syncing ICS feed %s: %s", feed.get("name"), exc)
+                db.rollback()
+
+        # Kalender entfernen die weder in CalDAV noch in ICS-Feeds vorhanden sind
         existing_cals = db.query(Calendar).all()
         for db_cal in existing_cals:
-            if db_cal.id not in remote_urls:
+            if db_cal.id not in remote_urls and db_cal.id not in ics_feed_ids:
                 logger.info("Removing deleted calendar: %s", db_cal.name)
                 db.query(Event).filter(Event.calendar_id == db_cal.id).delete()
                 db.delete(db_cal)

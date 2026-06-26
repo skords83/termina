@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     api_token: str
     database_url: str = "sqlite:///./termina.db"
     cors_origins: list[str] = ["http://localhost:5173"]
+    ics_feeds: list[dict] = []
 
     model_config = {
         "env_file": ".env",
