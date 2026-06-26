@@ -5,6 +5,10 @@ from typing import Any
 
 from icalendar import Calendar as ICalendar
 from lxml import etree
+
+# OxiCloud sendet ungültige XML-Namespace-Präfixe (z.B. <http://apple.com/ns/ical/:calendar-color/>).
+# recover=True lässt lxml solche Tags überspringen statt abzubrechen.
+_XML_PARSER = etree.XMLParser(recover=True)
 from sqlalchemy.orm import Session
 
 from app.caldav.client import get_caldav_client
@@ -231,7 +235,7 @@ def _propfind_etags(client, cal_url: str) -> dict[str, str]:
     etags: dict[str, str] = {}
     try:
         raw_xml = resp.raw if isinstance(resp.raw, bytes) else resp.raw.encode()
-        tree = etree.fromstring(raw_xml)
+        tree = etree.fromstring(raw_xml, _XML_PARSER)
     except Exception as exc:
         logger.warning("Could not parse PROPFIND response for %s: %s", cal_url, exc)
         return etags
@@ -275,7 +279,7 @@ def _multiget_ical(client, cal_url: str, urls: list[str]) -> dict[str, tuple[str
     result: dict[str, tuple[str, str]] = {}
     try:
         raw_xml = resp.raw if isinstance(resp.raw, bytes) else resp.raw.encode()
-        tree = etree.fromstring(raw_xml)
+        tree = etree.fromstring(raw_xml, _XML_PARSER)
     except Exception as exc:
         logger.error("Could not parse MULTIGET response for %s: %s", cal_url, exc)
         return result
