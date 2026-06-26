@@ -99,36 +99,31 @@ def _discover_calendars(client: Any) -> list[dict]:
         username = settings.caldav_username
         cal_root = f"{base_url}/calendars/{username}/"
 
-    # PROPFIND direkt über urllib statt client.propfind() — die caldav-Lib würde
-    # OxiClouds ungültigen XML-Namespace-Prefix (<http://apple.com/ns/ical/:calendar-color/>)
-    # intern parsen und dabei abstürzen. Mit urllib + _XML_PARSER(recover=True)
-    # überspringt lxml das fehlerhafte Tag und parst den Rest korrekt.
-    import base64
-    import urllib.error
-    import urllib.request as urlreq
-
-    _credentials = base64.b64encode(
-        f"{settings.caldav_username}:{settings.caldav_password}".encode()
-    ).decode()
-    _req = urlreq.Request(
-        cal_root,
-        data=_DISCOVERY_BODY.encode("utf-8"),
-        method="PROPFIND",
-        headers={
-            "Content-Type": "application/xml; charset=UTF-8",
-            "Depth": "1",
-            "Authorization": f"Basic {_credentials}",
-        },
-    )
+    # PROPFIND über die requests.Session der caldav-Lib (nutzt deren Auth-Handling),
+    # aber ohne die caldav-Lib-Response-Klasse — die würde OxiClouds ungültigen
+    # XML-Namespace-Prefix (<http://apple.com/ns/ical/:calendar-color/>) intern parsen
+    # und dabei abstürzen. Mit _XML_PARSER(recover=True) überspringt lxml das fehlerhafte
+    # Tag und parst den Rest korrekt.
     try:
-        with urlreq.urlopen(_req, timeout=30) as _http_resp:
-            raw_xml = _http_resp.read()
-    except urllib.error.HTTPError as exc:
-        logger.error("PROPFIND auf %s fehlgeschlagen: HTTP %d", cal_root, exc.code)
-        return []
+        _resp = client.session.request(
+            "PROPFIND",
+            cal_root,
+            data=_DISCOVERY_BODY.encode("utf-8"),
+            headers={
+                "Content-Type": "application/xml; charset=UTF-8",
+                "Depth": "1",
+            },
+            timeout=30,
+        )
+        if _resp.status_code not in (200, 207):
+            logger.error(
+                "PROPFIND auf %s fehlgeschlagen: HTTP %d", cal_root, _resp.status_code
+            )
+            return None
+        raw_xml = _resp.content
     except Exception as exc:
         logger.error("PROPFIND auf %s fehlgeschlagen: %s", cal_root, exc)
-        return []
+        return None
 
     tree = etree.fromstring(raw_xml, _XML_PARSER)
 
@@ -836,6 +831,15 @@ def run_sync() -> None:
         client = get_caldav_client()
 
         calendars = _discover_calendars(client)
+        # None = Discovery ist fehlgeschlagen (HTTP-Fehler o.ä.) — kein Cleanup,
+        # damit keine Kalender-Daten durch einen transienten Fehler gelöscht werden.
+        discovery_ok = calendars is not None
+        if not discovery_ok:
+            logger.warning(
+                "CalDAV-Discovery fehlgeschlagen — Kalender-Cleanup wird übersprungen."
+            )
+            calendars = []
+
         remote_urls = {c["url"] for c in calendars}
 
         for cal_info in calendars:
@@ -858,13 +862,16 @@ def run_sync() -> None:
                 logger.error("Error syncing ICS feed %s: %s", feed.get("name"), exc)
                 db.rollback()
 
-        # Kalender entfernen die weder im CalDAV-Server noch in den ICS-Feeds vorhanden sind
-        existing_cals = db.query(Calendar).all()
-        for db_cal in existing_cals:
-            if db_cal.id not in remote_urls and db_cal.id not in ics_feed_ids:
-                logger.info("Removing deleted calendar: %s", db_cal.name)
-                db.query(Event).filter(Event.calendar_id == db_cal.id).delete()
-                db.delete(db_cal)
+        # Kalender entfernen die weder im CalDAV-Server noch in den ICS-Feeds vorhanden sind.
+        # Nur wenn Discovery erfolgreich war — sonst würden alle CalDAV-Kalender fälschlich
+        # als gelöscht gewertet.
+        if discovery_ok:
+            existing_cals = db.query(Calendar).all()
+            for db_cal in existing_cals:
+                if db_cal.id not in remote_urls and db_cal.id not in ics_feed_ids:
+                    logger.info("Removing deleted calendar: %s", db_cal.name)
+                    db.query(Event).filter(Event.calendar_id == db_cal.id).delete()
+                    db.delete(db_cal)
         db.commit()
 
     except Exception as exc:
