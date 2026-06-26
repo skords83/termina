@@ -232,7 +232,7 @@ def create_event(
 def update_event(
     calendar_id: str,
     uid: str,
-    etag: str,
+    etag: str | None,
     summary: str,
     start: datetime,
     end: datetime,
@@ -259,7 +259,7 @@ def update_event(
             raise ValueError(f"Event nicht gefunden: {uid}")
 
         current_etag = _get_etag(obj)
-        if current_etag and current_etag != etag:
+        if current_etag and etag and current_etag != etag:
             raise ConflictError(f"ETag-Konflikt für Event {uid}")
 
         if recurrence_id is None:
@@ -316,7 +316,7 @@ def update_event(
         raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
 
 
-def delete_event(calendar_id: str, uid: str, etag: str) -> None:
+def delete_event(calendar_id: str, uid: str, etag: str | None) -> None:
     try:
         client = _get_client()
         cal = _find_caldav_calendar(client, calendar_id)
@@ -328,7 +328,7 @@ def delete_event(calendar_id: str, uid: str, etag: str) -> None:
             raise ValueError(f"Event nicht gefunden: {uid}")
 
         current_etag = _get_etag(obj)
-        if current_etag and current_etag != etag:
+        if current_etag and etag and current_etag != etag:
             raise ConflictError(f"ETag-Konflikt für Event {uid}")
 
         obj.delete()
@@ -347,7 +347,7 @@ def move_event(
     mode: MoveMode,
     calendar_id: str,
     uid: str,
-    etag: str,
+    etag: str | None,
     original_start: datetime,
     new_start: datetime,
     new_end: datetime,
@@ -366,7 +366,7 @@ def move_event(
             raise ValueError(f"Event nicht gefunden: {uid}")
 
         current_etag = _get_etag(obj)
-        if current_etag and current_etag != etag:
+        if current_etag and etag and current_etag != etag:
             raise ConflictError(f"ETag-Konflikt für Event {uid}")
 
         ical = Calendar.from_ical(obj.data)

@@ -64,7 +64,7 @@ class EventCreate(BaseModel):
 
 
 class EventUpdate(BaseModel):
-    etag: str
+    etag: str | None = None
     summary: str
     start: datetime | date_cls
     end: datetime | date_cls
@@ -79,7 +79,7 @@ class EventUpdate(BaseModel):
 
 class EventMove(BaseModel):
     mode: Literal["single", "future", "all"]
-    etag: str
+    etag: str | None = None
     original_start: datetime
     new_start: datetime
     new_end: datetime
@@ -528,7 +528,7 @@ def post_move(
 @router.delete("/events/{uid}", status_code=204)
 def delete_event_endpoint(
     uid: str,
-    etag: str = Query(...),
+    etag: str | None = Query(None),
     background: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db),
     _: None = Depends(require_token),
