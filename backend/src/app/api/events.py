@@ -290,7 +290,7 @@ def post_event(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except CalDAVTimeoutError as e:
-        raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
+        raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
 
     background.add_task(run_sync)
     return {"uid": uid}
@@ -365,7 +365,7 @@ def put_event(
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         except CalDAVTimeoutError as e:
-            raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
+            raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
 
         background.add_task(run_sync)
         return {"uid": uid}
@@ -389,7 +389,7 @@ def put_event(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except CalDAVTimeoutError as e:
-        raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
+        raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
 
     background.add_task(run_sync)
     return {"uid": uid}
@@ -438,7 +438,7 @@ def post_move(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except CalDAVTimeoutError as e:
-        raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
+        raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
 
     # Lokale DB sofort aktualisieren
     if body.mode == "all":
@@ -548,7 +548,7 @@ def delete_event_endpoint(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except CalDAVTimeoutError as e:
-        raise HTTPException(status_code=503, detail=f"Nextcloud nicht erreichbar: {e}")
+        raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
 
     db.query(EventOverride).filter(EventOverride.master_uid == uid).delete(synchronize_session=False)
     db.delete(event)

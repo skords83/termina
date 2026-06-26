@@ -77,15 +77,23 @@ def _discover_calendars(client: Any) -> list[dict]:
 
     from app.config import settings
 
-    # Kalender-Root aus caldav_url ableiten
-    # caldav_url = https://nc.skords.de/remote.php/dav
-    # → https://nc.skords.de/remote.php/dav/calendars/<username>/
     base_url = str(client.url).rstrip("/")
-    # Nur Schema + Host für href-Rekonstruktion (hrefs sind absolute Pfade)
     parsed = urlparse(base_url)
     host_url = f"{parsed.scheme}://{parsed.netloc}"
-    username = settings.caldav_username
-    cal_root = f"{base_url}/calendars/{username}/"
+
+    # Kalender-Root per calendar_home_set (funktioniert mit OxiCloud + Nextcloud).
+    # Fallback auf den Nextcloud-Pfad falls der Server kein calendar_home_set liefert.
+    try:
+        cal_home_url = str(client.principal().calendar_home_set.url)
+        if cal_home_url.startswith("/"):
+            cal_home_url = host_url + cal_home_url
+        cal_root = cal_home_url.rstrip("/") + "/"
+    except Exception as exc:
+        logger.warning(
+            "calendar_home_set nicht verfügbar, nutze Fallback-Pfad: %s", exc
+        )
+        username = settings.caldav_username
+        cal_root = f"{base_url}/calendars/{username}/"
 
     resp = client.propfind(
         url=cal_root,
@@ -404,7 +412,7 @@ def _upsert_event(
 def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
     """
     Sync für ICS-Abo-Kalender (cs:subscribed).
-    Nextcloud liefert diese Events nicht per PROPFIND/REPORT,
+    Events aus abonnierten Kalendern sind per PROPFIND/REPORT nicht abrufbar,
     daher holen wir das ICS direkt von der Quell-URL.
     """
     import urllib.error
@@ -821,7 +829,7 @@ def run_sync() -> None:
                 logger.error("Error syncing ICS feed %s: %s", feed.get("name"), exc)
                 db.rollback()
 
-        # Kalender entfernen die weder in CalDAV noch in ICS-Feeds vorhanden sind
+        # Kalender entfernen die weder im CalDAV-Server noch in den ICS-Feeds vorhanden sind
         existing_cals = db.query(Calendar).all()
         for db_cal in existing_cals:
             if db_cal.id not in remote_urls and db_cal.id not in ics_feed_ids:

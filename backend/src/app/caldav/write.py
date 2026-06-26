@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 BERLIN = zoneinfo.ZoneInfo("Europe/Berlin")
 
 
+def _to_utc(dt: datetime) -> datetime:
+    """Konvertiert datetime zu UTC. Naive Datetimes werden als Europe/Berlin behandelt."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=BERLIN)
+    return dt.astimezone(timezone.utc)
+
+
 class ConflictError(Exception):
     pass
 
@@ -175,10 +182,8 @@ def _make_ical(
         ev.add("dtstart", s_date)
         ev.add("dtend", e_date)
     else:
-        s = start.replace(tzinfo=None) if isinstance(start, datetime) and start.tzinfo else start
-        e = end.replace(tzinfo=None) if isinstance(end, datetime) and end.tzinfo else end
-        ev.add("dtstart", s)
-        ev.add("dtend", e)
+        ev.add("dtstart", _to_utc(start))
+        ev.add("dtend", _to_utc(end))
 
     if location:
         ev.add("location", location)
@@ -292,12 +297,9 @@ def update_event(
                 override.add("DTSTART", s_date)
                 override.add("DTEND", e_date)
             else:
-                rid_naive = recurrence_id.replace(tzinfo=None) if recurrence_id.tzinfo else recurrence_id
-                s = start.replace(tzinfo=None) if isinstance(start, datetime) and start.tzinfo else start
-                e = end.replace(tzinfo=None) if isinstance(end, datetime) and end.tzinfo else end
-                override.add("RECURRENCE-ID", rid_naive)
-                override.add("DTSTART", s)
-                override.add("DTEND", e)
+                override.add("RECURRENCE-ID", _to_utc(recurrence_id))
+                override.add("DTSTART", _to_utc(start))
+                override.add("DTEND", _to_utc(end))
 
             if location:
                 override.add("LOCATION", location)
@@ -495,9 +497,9 @@ def _apply_move_single(
         override.add("DTSTART", s_date)
         override.add("DTEND", e_date)
     else:
-        override.add("RECURRENCE-ID", recurrence_id)
-        override.add("DTSTART", new_start)
-        override.add("DTEND", new_end)
+        override.add("RECURRENCE-ID", _to_utc(recurrence_id))
+        override.add("DTSTART", _to_utc(new_start))
+        override.add("DTEND", _to_utc(new_end))
 
     ical.add_component(override)
 
@@ -585,10 +587,8 @@ def _apply_move_future(
         new_ev.add("dtstart", s_date)
         new_ev.add("dtend", e_date)
     else:
-        ns = new_start.replace(tzinfo=None) if new_start.tzinfo else new_start
-        ne = new_end.replace(tzinfo=None) if new_end.tzinfo else new_end
-        new_ev.add("dtstart", ns)
-        new_ev.add("dtend", ne)
+        new_ev.add("dtstart", _to_utc(new_start))
+        new_ev.add("dtend", _to_utc(new_end))
 
     fresh_rrule = _strip_rrule_keys(rrule, {"UNTIL", "COUNT"})
     new_ev.add("rrule", fresh_rrule)
