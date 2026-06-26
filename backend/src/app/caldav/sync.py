@@ -113,6 +113,7 @@ def _discover_calendars(client: Any) -> list[dict]:
                 "Content-Type": "application/xml; charset=UTF-8",
                 "Depth": "1",
             },
+            auth=(settings.caldav_username, settings.caldav_password),
             timeout=30,
         )
         if _resp.status_code not in (200, 207):
