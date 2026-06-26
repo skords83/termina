@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./termina.db"
     cors_origins: list[str] = ["http://localhost:5173"]
     ics_feeds: list[dict] = []
+    calendar_colors: dict[str, str] = {}
 
     model_config = {
         "env_file": ".env",

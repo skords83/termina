@@ -598,6 +598,24 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
     )
 
 
+def _apply_calendar_colors(db: Session, color_map: dict[str, str]) -> None:
+    """Setzt Kalenderfarben aus der Konfiguration (Substring-Match, case-insensitiv)."""
+    if not color_map:
+        return
+    updated = 0
+    for cal in db.query(Calendar).all():
+        name_lower = (cal.name or "").lower()
+        for fragment, color in color_map.items():
+            if fragment.lower() in name_lower:
+                if cal.color != color:
+                    cal.color = color
+                    updated += 1
+                break
+    if updated:
+        db.commit()
+        logger.info("Kalenderfarben aktualisiert: %d Kalender", updated)
+
+
 def _sync_ics_feed(db: Session, feed: dict) -> None:
     """Synct einen extern konfigurierten ICS-Feed (read-only, kein CalDAV-Write)."""
     import hashlib
@@ -874,6 +892,8 @@ def run_sync() -> None:
                     db.query(Event).filter(Event.calendar_id == db_cal.id).delete()
                     db.delete(db_cal)
         db.commit()
+
+        _apply_calendar_colors(db, settings.calendar_colors)
 
     except Exception as exc:
         logger.error("Sync run failed: %s", exc)
