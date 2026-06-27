@@ -529,7 +529,6 @@ def post_move(
 def delete_event_endpoint(
     uid: str,
     etag: str | None = Query(None),
-    background: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db),
     _: None = Depends(require_token),
 ):
@@ -553,5 +552,3 @@ def delete_event_endpoint(
     db.query(EventOverride).filter(EventOverride.master_uid == uid).delete(synchronize_session=False)
     db.delete(event)
     db.commit()
-
-    background.add_task(run_sync)
