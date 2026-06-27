@@ -200,15 +200,22 @@ def _discover_calendars(client: Any) -> list[dict]:
 
 
 def _parse_dt(value) -> tuple[datetime | None, bool]:
-    """Return (datetime_naive_local, all_day)."""
+    """Return (datetime_naive_local, all_day).
+
+    Midnight-UTC datetimes (DTSTART:20260608T000000Z) werden als all-day erkannt —
+    wir schreiben ganztägige Events in diesem Format, weil OxiCloud VALUE=DATE
+    bei mehrtägigen Events ablehnt.
+    """
     if value is None:
         return None, False
     if isinstance(value, datetime):
         if value.tzinfo is None:
             return value.replace(tzinfo=None), False
-        else:
-            local = value.astimezone(BERLIN)
-            return local.replace(tzinfo=None), False
+        utc = value.astimezone(timezone.utc)
+        if utc.hour == 0 and utc.minute == 0 and utc.second == 0:
+            return datetime(utc.year, utc.month, utc.day), True
+        local = value.astimezone(BERLIN)
+        return local.replace(tzinfo=None), False
     if isinstance(value, date):
         return datetime(value.year, value.month, value.day), True
     return None, False
