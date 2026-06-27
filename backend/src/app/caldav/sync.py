@@ -367,7 +367,19 @@ def _upsert_event(
 
     existing = local_events.get(master_uid)
     if existing and existing.etag == remote_etag:
-        return
+        # Normaler Fall: Event unverändert → überspringen.
+        # Ausnahme: Event wurde mit falschem all_day=False + 02:00 Uhr gespeichert
+        # (= midnight UTC wurde als Berliner Lokalzeit fehlinterpretiert).
+        # In diesem Fall trotzdem neu einlesen, damit _parse_dt korrigiert.
+        wrongly_timed = (
+            not existing.all_day
+            and existing.start is not None
+            and existing.start.hour == 2
+            and existing.start.minute == 0
+            and existing.start.second == 0
+        )
+        if not wrongly_timed:
+            return
 
     summary = str(master_component.get("SUMMARY", "")) or None
     location = str(master_component.get("LOCATION", "")) or None
