@@ -45,6 +45,7 @@ export interface UpdateEventPayload {
 
 export interface DeleteEventPayload {
   etag: string;
+  recurrence_id?: string | null;
 }
 
 export type MoveMode = 'single' | 'future' | 'all';

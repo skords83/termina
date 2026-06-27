@@ -14,6 +14,7 @@
 //   calendars       – für den Kalender-Namen (optional, alternativ calendarName)
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { deleteEvent } from "../api/write";
 import { useToast } from "./Toast";
 import type { CalendarEvent, WriteError } from "../types";
@@ -280,6 +281,7 @@ export function EventPopup({
   const { showToast } = useToast();
   const popupRef = useRef<HTMLDivElement>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [recurringDeleteDialog, setRecurringDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
 
@@ -318,14 +320,14 @@ export function EventPopup({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const handleDelete = useCallback(async () => {
+  const executeDelete = useCallback(async (recurrenceId?: string | null) => {
     if (!event.etag) {
       showToast("Kein ETag – Termin kann nicht gelöscht werden", "error");
       return;
     }
     setDeleting(true);
     try {
-      await deleteEvent(event.uid, { etag: event.etag });
+      await deleteEvent(event.uid, { etag: event.etag, recurrence_id: recurrenceId });
       showToast("Termin gelöscht", "success");
       onDeleted(event.uid);
       onClose();
@@ -346,12 +348,21 @@ export function EventPopup({
       }
       setDeleting(false);
       setConfirmDelete(false);
+      setRecurringDeleteDialog(false);
     }
   }, [event, onDeleted, onClose, showToast]);
 
+  const handleDeleteClick = useCallback(() => {
+    if (event.is_recurring) {
+      setRecurringDeleteDialog(true);
+    } else {
+      setConfirmDelete(true);
+    }
+  }, [event.is_recurring]);
+
   const timeStr = formatDateTime(event.start, event.end, event.all_day);
 
-  return (
+  const popup = (
     <div ref={popupRef} style={S.popup(pos.top, pos.left)}>
       <div style={S.colorBar(calendarColor)} />
       <div style={S.body}>
@@ -405,7 +416,7 @@ export function EventPopup({
               </button>
               <button
                 style={deleting ? S.btnDeleteLoading : S.btnDeleteConfirm}
-                onClick={handleDelete}
+                onClick={() => executeDelete()}
                 disabled={deleting}
               >
                 {deleting ? "Löschen…" : "Wirklich löschen"}
@@ -424,7 +435,7 @@ export function EventPopup({
               </button>
               <button
                 style={S.btnDelete}
-                onClick={() => setConfirmDelete(true)}
+                onClick={handleDeleteClick}
               >
                 ✕ Löschen
               </button>
@@ -433,5 +444,49 @@ export function EventPopup({
         </div>
       </div>
     </div>
+  );
+
+  return (
+    <>
+      {popup}
+      {recurringDeleteDialog && createPortal(
+        <div className="modal-backdrop" onClick={() => setRecurringDeleteDialog(false)}>
+          <div className="rec-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="rec-dialog-header">
+              <h3 className="rec-dialog-title">Termin löschen</h3>
+              <p className="rec-dialog-sub">„{event.summary}" ist ein Serientermin.</p>
+            </div>
+            <div className="rec-dialog-options">
+              <button
+                className="rec-option"
+                onClick={() => { setRecurringDeleteDialog(false); executeDelete(event.recurrence_id); }}
+                disabled={deleting}
+              >
+                <div className="rec-option-title">Nur diesen Termin</div>
+                <div className="rec-option-desc">
+                  Nur diese eine Instanz wird gelöscht. Die Serie bleibt bestehen.
+                </div>
+              </button>
+              <button
+                className="rec-option"
+                onClick={() => { setRecurringDeleteDialog(false); executeDelete(); }}
+                disabled={deleting}
+              >
+                <div className="rec-option-title">Alle Termine der Serie</div>
+                <div className="rec-option-desc">
+                  Die gesamte Serie wird unwiderruflich gelöscht.
+                </div>
+              </button>
+            </div>
+            <div className="rec-dialog-footer">
+              <button className="rec-cancel" onClick={() => setRecurringDeleteDialog(false)}>
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }

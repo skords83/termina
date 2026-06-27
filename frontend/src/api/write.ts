@@ -95,8 +95,12 @@ export async function deleteEvent(
   uid: string,
   payload: DeleteEventPayload
 ): Promise<void> {
+  const params = new URLSearchParams({ etag: payload.etag });
+  if (payload.recurrence_id) {
+    params.set('recurrence_id', payload.recurrence_id);
+  }
   const res = await fetch(
-    `/api/events/${encodeURIComponent(uid)}?etag=${encodeURIComponent(payload.etag)}`,
+    `/api/events/${encodeURIComponent(uid)}?${params.toString()}`,
     {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${getToken()}` },

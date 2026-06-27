@@ -32,6 +32,7 @@ from app.caldav.write import (
     create_event,
     update_event,
     delete_event,
+    delete_occurrence,
     move_event,
     ConflictError,
     CalDAVTimeoutError,
@@ -528,7 +529,9 @@ def post_move(
 @router.delete("/events/{uid}", status_code=204)
 def delete_event_endpoint(
     uid: str,
+    background: BackgroundTasks,
     etag: str | None = Query(None),
+    recurrence_id: str | None = Query(None),
     db: Session = Depends(get_db),
     _: None = Depends(require_token),
 ):
@@ -536,6 +539,46 @@ def delete_event_endpoint(
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
 
+    # Einzelne Instanz einer Serie löschen (EXDATE)
+    if recurrence_id is not None:
+        try:
+            from datetime import datetime as dt_cls
+            rid_dt = dt_cls.fromisoformat(recurrence_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Ungültige recurrence_id")
+
+        try:
+            delete_occurrence(
+                calendar_id=event.calendar_id,
+                uid=uid,
+                etag=etag,
+                recurrence_id=rid_dt,
+                all_day=event.all_day,
+            )
+        except ConflictError:
+            raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except CalDAVTimeoutError as e:
+            raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
+
+        # Vorhandenen Override für diese Instanz löschen und neuen mit start=None anlegen
+        rid_naive = rid_dt.replace(tzinfo=None)
+        db.query(EventOverride).filter(
+            EventOverride.master_uid == uid,
+            EventOverride.recurrence_id == rid_naive,
+        ).delete(synchronize_session=False)
+        db.add(EventOverride(
+            master_uid=uid,
+            recurrence_id=rid_naive,
+            start=None,
+            end=None,
+        ))
+        db.commit()
+        background.add_task(run_sync)
+        return
+
+    # Ganzes Event löschen
     try:
         delete_event(
             calendar_id=event.calendar_id,

@@ -390,6 +390,71 @@ def delete_event(calendar_id: str, uid: str, etag: str | None) -> None:
         raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
 
 
+def delete_occurrence(
+    calendar_id: str,
+    uid: str,
+    etag: str | None,
+    recurrence_id: datetime,
+    all_day: bool = False,
+) -> None:
+    """Löscht eine einzelne Instanz einer Terminserie per EXDATE."""
+    try:
+        client = _get_client()
+        cal = _find_caldav_calendar(client, calendar_id)
+        if cal is None:
+            raise ValueError(f"Kalender nicht gefunden: {calendar_id}")
+
+        obj = _find_caldav_event(cal, uid)
+        if obj is None:
+            raise ValueError(f"Event nicht gefunden: {uid}")
+
+        current_etag = _get_etag(obj)
+        if current_etag and etag and current_etag != etag:
+            raise ConflictError(f"ETag-Konflikt für Event {uid}")
+
+        ical = Calendar.from_ical(obj.data)
+        master = _find_master(ical)
+        if master is None:
+            raise ValueError("Kein Master-VEVENT gefunden")
+
+        # Eventuelle Override-VEVENTs für diese Instanz entfernen
+        to_remove = [
+            sub for sub in ical.subcomponents
+            if getattr(sub, "name", None) == "VEVENT"
+            and sub.get("RECURRENCE-ID") is not None
+            and _dt_equal(sub["RECURRENCE-ID"].dt, recurrence_id)
+        ]
+        for sub in to_remove:
+            ical.subcomponents.remove(sub)
+
+        # EXDATE zum Master hinzufügen
+        exdate_dt = _to_midnight_utc(recurrence_id) if all_day else _to_utc(recurrence_id)
+        existing_exdates = master.get("EXDATE")
+        if existing_exdates is None:
+            from icalendar import vDDDLists
+            master.add("EXDATE", [exdate_dt])
+        else:
+            # EXDATE kann ein einzelner Wert oder eine Liste sein
+            if not isinstance(existing_exdates, list):
+                existing_exdates = [existing_exdates]
+            all_dts = []
+            for ex in existing_exdates:
+                dts = ex.dts if hasattr(ex, "dts") else [ex]
+                all_dts.extend(dt.dt for dt in dts)
+            all_dts.append(exdate_dt)
+            del master["EXDATE"]
+            master.add("EXDATE", all_dts)
+
+        obj.data = ical.to_ical()
+        _caldav_op_with_retry(obj.save, context=f"delete_occurrence({uid}, {recurrence_id})")
+    except (ValueError, ConflictError):
+        raise
+    except CalDAVTimeoutError:
+        raise
+    except Exception as e:
+        raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
+
+
 # ── Move: alle drei Modi ─────────────────────────────────────────────────────
 
 MoveMode = Literal["single", "future", "all"]
