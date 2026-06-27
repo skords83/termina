@@ -6,7 +6,9 @@
     "allow": [
       "Bash(python *)",
       "Bash(npx tsc *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(.venv/bin/python3 -m py_compile src/app/caldav/write.py)",
+      "Bash(.venv/bin/python3 -m py_compile src/app/main.py)"
     ]
   }
 }

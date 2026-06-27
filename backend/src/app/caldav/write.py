@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 import zoneinfo
 from datetime import datetime, timezone, timedelta, date as date_cls
@@ -200,6 +201,39 @@ def _make_ical(
 
 # ── Create / Update / Delete ─────────────────────────────────────────────────
 
+def _caldav_op_with_retry(fn, context: str, retries: int = 2, delay: float = 1.5) -> None:
+    """Führt fn() aus und wiederholt bei transienten CalDAV-Fehlern.
+
+    Nextcloud gibt gelegentlich 500 JSON zurück (DB-Lock, interne Locks), die das
+    caldav-Lib als XMLSyntaxError auflöst. Ein kurzes Retry löst das zuverlässig.
+    ValueError und ConflictError werden nie wiederholt.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, retries + 2):
+        try:
+            fn()
+            if attempt > 1:
+                logger.info("%s: erfolgreich nach Versuch %d", context, attempt)
+            return
+        except (ValueError, ConflictError):
+            raise
+        except Exception as e:
+            last_exc = e
+            is_timeout = "timeout" in str(e).lower() or "ReadTimeout" in type(e).__name__
+            logger.warning(
+                "%s: Versuch %d/%d fehlgeschlagen (%s: %s)%s",
+                context, attempt, retries + 1, type(e).__name__, e,
+                "" if attempt > retries else f" – retry in {delay}s",
+            )
+            if is_timeout or attempt > retries:
+                break
+            time.sleep(delay)
+
+    if last_exc and ("timeout" in str(last_exc).lower() or "ReadTimeout" in type(last_exc).__name__):
+        raise CalDAVTimeoutError(f"CalDAV-Server nicht erreichbar: {last_exc}") from last_exc
+    raise CalDAVTimeoutError(f"CalDAV-Fehler nach {retries + 1} Versuchen: {last_exc}") from last_exc
+
+
 def create_event(
     calendar_id: str,
     summary: str,
@@ -218,22 +252,15 @@ def create_event(
         all_day, start, end, ical_data.decode("utf-8", errors="replace"),
     )
 
-    try:
-        client = _get_client()
-        cal = _find_caldav_calendar(client, calendar_id)
-        if cal is None:
-            raise ValueError(f"Kalender nicht gefunden: {calendar_id}")
-        cal.save_event(ical_data)
-    except ValueError:
-        raise
-    except Exception as e:
-        logger.error(
-            "create_event fehlgeschlagen (all_day=%s start=%s end=%s): %s: %s",
-            all_day, start, end, type(e).__name__, e,
-        )
-        if "timeout" in str(e).lower() or "ReadTimeout" in type(e).__name__:
-            raise CalDAVTimeoutError(f"CalDAV-Server nicht erreichbar: {e}") from e
-        raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
+    client = _get_client()
+    cal = _find_caldav_calendar(client, calendar_id)
+    if cal is None:
+        raise ValueError(f"Kalender nicht gefunden: {calendar_id}")
+
+    _caldav_op_with_retry(
+        lambda: cal.save_event(ical_data),
+        context=f"create_event(all_day={all_day}, start={start})",
+    )
 
     return uid
 
@@ -275,7 +302,6 @@ def update_event(
             # Pfad 1: Master ersetzen
             ical_data = _make_ical(uid, summary, start, end, all_day, location, description, rrule)
             obj.data = ical_data
-            obj.save()
         else:
             # Pfad 2: Override für eine Instanz einfügen
             ical = Calendar.from_ical(obj.data)
@@ -317,9 +343,12 @@ def update_event(
 
             ical.add_component(override)
             obj.data = ical.to_ical()
-            obj.save()
+
+        _caldav_op_with_retry(obj.save, context=f"update_event({uid})")
 
     except (ValueError, ConflictError):
+        raise
+    except CalDAVTimeoutError:
         raise
     except Exception as e:
         raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
@@ -340,8 +369,10 @@ def delete_event(calendar_id: str, uid: str, etag: str | None) -> None:
         if current_etag and etag and current_etag != etag:
             raise ConflictError(f"ETag-Konflikt für Event {uid}")
 
-        obj.delete()
+        _caldav_op_with_retry(obj.delete, context=f"delete_event({uid})")
     except (ValueError, ConflictError):
+        raise
+    except CalDAVTimeoutError:
         raise
     except Exception as e:
         raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
@@ -388,21 +419,21 @@ def move_event(
         if mode == "all":
             _apply_move_all(ical, master, original_start, new_start, all_day)
             obj.data = ical.to_ical()
-            obj.save()
+            _caldav_op_with_retry(obj.save, context=f"move_event(all, {uid})")
 
         elif mode == "single":
             if recurrence_id is None:
                 raise ValueError("recurrence_id ist für mode='single' erforderlich")
             _apply_move_single(ical, master, uid, recurrence_id, new_start, new_end, all_day)
             obj.data = ical.to_ical()
-            obj.save()
+            _caldav_op_with_retry(obj.save, context=f"move_event(single, {uid})")
 
         elif mode == "future":
             if recurrence_id is None:
                 raise ValueError("recurrence_id ist für mode='future' erforderlich")
             new_uid = _apply_move_future(cal, ical, master, recurrence_id, new_start, new_end, all_day)
             obj.data = ical.to_ical()
-            obj.save()
+            _caldav_op_with_retry(obj.save, context=f"move_event(future, {uid})")
             result["new_uid"] = new_uid
 
         else:
@@ -411,6 +442,8 @@ def move_event(
         return result
 
     except (ValueError, ConflictError):
+        raise
+    except CalDAVTimeoutError:
         raise
     except Exception as e:
         logger.exception("move_event(%s) failed", mode)
