@@ -627,6 +627,16 @@ export default function App() {
                   setCurrentDate(new Date(dateStr + 'T00:00:00'));
                   setView('day');
                 }}
+                onWeekClick={(weekStart) => {
+                  if (isFocusClick()) return;
+                  setCurrentDate(weekStart);
+                  setView('week');
+                }}
+                onDayOpen={(dateStr) => {
+                  if (isFocusClick()) return;
+                  setCurrentDate(new Date(dateStr + 'T00:00:00'));
+                  setView('day');
+                }}
               />
             )}
             {view === 'week' && (

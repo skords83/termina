@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CalendarEvent, Calendar } from '../types';
 
@@ -11,9 +11,19 @@ interface Props {
   onEventClick: (event: CalendarEvent, e: React.MouseEvent) => void;
   onDayClick: (dateStr: string) => void;
   onMoreClick?: (dateStr: string) => void;
+  onWeekClick?: (weekStart: Date) => void;
+  onDayOpen?: (dateStr: string) => void;
 }
 
 const WEEKDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+
+function getISOWeek(d: Date): number {
+  const date = new Date(d);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + 3 - ((date.getDay() + 6) % 7));
+  const week1 = new Date(date.getFullYear(), 0, 4);
+  return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+}
 
 function localDateStr(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -109,6 +119,7 @@ function DroppableDayCell({
   dayNum,
   children,
   onDayClick,
+  onDayOpen,
 }: {
   dateStr: string;
   current: boolean;
@@ -116,6 +127,7 @@ function DroppableDayCell({
   dayNum: number;
   children: React.ReactNode;
   onDayClick: (dateStr: string) => void;
+  onDayOpen?: (dateStr: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `month-day-${dateStr}`,
@@ -136,7 +148,16 @@ function DroppableDayCell({
       onClick={() => onDayClick(dateStr)}
     >
       <div className="day-cell-header">
-        <span className="day-number">{dayNum}</span>
+        <span
+          className={`day-number${onDayOpen ? ' day-number--clickable' : ''}`}
+          onClick={(e) => {
+            if (!onDayOpen) return;
+            e.stopPropagation();
+            onDayOpen(dateStr);
+          }}
+        >
+          {dayNum}
+        </span>
         <button
           className="day-add-btn"
           onClick={(e) => {
@@ -164,6 +185,8 @@ export function MonthView({
   onEventClick,
   onDayClick,
   onMoreClick,
+  onWeekClick,
+  onDayOpen,
 }: Props) {
   const today = new Date();
 
@@ -241,9 +264,18 @@ export function MonthView({
     return localDateStr(date) === localDateStr(today);
   }
 
+  const weeks = useMemo(() => {
+    const result: Array<typeof cells> = [];
+    for (let i = 0; i < cells.length; i += 7) {
+      result.push(cells.slice(i, i + 7));
+    }
+    return result;
+  }, [cells]);
+
   return (
     <div className="month-view">
       <div className="month-header">
+        <div className="month-kw-header">KW</div>
         {WEEKDAYS.map((d) => (
           <div key={d} className="month-weekday">
             {d}
@@ -252,7 +284,18 @@ export function MonthView({
       </div>
 
       <div className="month-grid">
-        {cells.map(({ date, current }, i) => {
+        {weeks.map((week, wi) => {
+          const kw = getISOWeek(week[0].date);
+          const weekStart = week[0].date;
+          return (
+            <React.Fragment key={wi}>
+              <div
+                className={`month-kw${onWeekClick ? ' month-kw--clickable' : ''}`}
+                onClick={() => onWeekClick?.(weekStart)}
+              >
+                {kw}
+              </div>
+              {week.map(({ date, current }, i) => {
           const key = localDateStr(date);
           const dayEvents = eventsByDate.get(key) ?? [];
 
@@ -264,6 +307,7 @@ export function MonthView({
               isToday={isToday(date)}
               dayNum={date.getDate()}
               onDayClick={onDayClick}
+              onDayOpen={onDayOpen}
             >
               <div className="event-list">
                 {dayEvents.slice(0, 6).map(({ ev, isStart, isEnd, isMultiDay }) => {
@@ -295,6 +339,9 @@ export function MonthView({
                 )}
               </div>
             </DroppableDayCell>
+          );
+        })}
+            </React.Fragment>
           );
         })}
       </div>

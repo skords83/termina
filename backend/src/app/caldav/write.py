@@ -213,6 +213,11 @@ def create_event(
     uid = str(uuid.uuid4())
     ical_data = _make_ical(uid, summary, start, end, all_day, location, description, rrule)
 
+    logger.debug(
+        "create_event: all_day=%s start=%s end=%s payload=\n%s",
+        all_day, start, end, ical_data.decode("utf-8", errors="replace"),
+    )
+
     try:
         client = _get_client()
         cal = _find_caldav_calendar(client, calendar_id)
@@ -222,6 +227,10 @@ def create_event(
     except ValueError:
         raise
     except Exception as e:
+        logger.error(
+            "create_event fehlgeschlagen (all_day=%s start=%s end=%s): %s: %s",
+            all_day, start, end, type(e).__name__, e,
+        )
         if "timeout" in str(e).lower() or "ReadTimeout" in type(e).__name__:
             raise CalDAVTimeoutError(f"CalDAV-Server nicht erreichbar: {e}") from e
         raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e

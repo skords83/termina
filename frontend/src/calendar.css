@@ -12,7 +12,7 @@
 
 .month-header {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: 32px repeat(7, 1fr);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   scrollbar-gutter: stable;
@@ -30,10 +30,43 @@
   text-align: right;
 }
 
+.month-kw-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.5;
+}
+
+.month-kw {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-3);
+  border-right: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+  user-select: none;
+}
+
+.month-kw--clickable {
+  cursor: pointer;
+}
+
+.month-kw--clickable:hover {
+  color: var(--accent);
+  background: var(--bg-hover, rgba(99, 130, 255, 0.06));
+}
+
 .month-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: 32px repeat(7, 1fr);
   grid-auto-rows: minmax(110px, 1fr);
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -52,7 +85,7 @@
   background: var(--bg);
   transition: background 0.1s;
 }
-.day-cell:nth-child(7n) { border-right: none; }
+.day-cell:nth-child(8n) { border-right: none; }
 
 /* POLISH #4: Inaktive Tage deutlich gedimmt */
 .day-cell--other { background: var(--bg-2); }
@@ -92,6 +125,17 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.day-number--clickable {
+  cursor: pointer;
+  border-radius: 50%;
+  transition: background 0.15s, color 0.15s;
+}
+
+.day-number--clickable:hover {
+  background: var(--accent);
+  color: #fff;
 }
 
 /* Day add button (hover-reveal) */

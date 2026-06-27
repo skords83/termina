@@ -10,9 +10,12 @@ from app.db.session import apply_migrations, create_tables
 from app.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s %(levelname)s %(name)s – %(message)s",
 )
+logging.getLogger("caldav").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
