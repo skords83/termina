@@ -682,7 +682,6 @@ export default function App() {
             onEdit={(ev) => { setSelectedEvent(null); setEditModal(ev); }}
             onDeleted={(uid) => {
               optimistic.deleteOptimistic(uid);
-              setRefreshNonce((n) => n + 1);
             }}
           />
         )}
