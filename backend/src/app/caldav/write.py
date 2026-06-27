@@ -145,18 +145,30 @@ def _to_date(x) -> date_cls:
     return x
 
 
+def _to_midnight_utc(x) -> datetime:
+    """Konvertiert date oder datetime in datetime midnight UTC.
+
+    OxiCloud akzeptiert keine VALUE=DATE-Properties (DTSTART;VALUE=DATE:…),
+    sondern erwartet immer vollständige datetime-Werte — auch für Ganztages-Events.
+    Midnight UTC ist die kanonische Darstellung für ganztägige Ereignisse.
+    """
+    d = _to_date(x)
+    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+
+
 def _normalize_all_day(start, end) -> tuple[date_cls, date_cls]:
-    """
-    iCal-Konvention: DTEND ist bei all-day Events EXCLUSIVE.
-    Ein eintägiges Event am 19.9. muss DTSTART=20260919, DTEND=20260920 haben.
-    Frontend schickt manchmal end == start — hier korrigieren, sonst hat das Event
-    in der DB Länge 0 und wird im Range-Filter / Rendering nicht sichtbar.
-    """
+    """DTEND ist bei all-day Events EXCLUSIVE. end == start wird auf start+1 korrigiert."""
     s = _to_date(start)
     e = _to_date(end)
     if e <= s:
         e = s + timedelta(days=1)
     return s, e
+
+
+def _normalize_all_day_utc(start, end) -> tuple[datetime, datetime]:
+    """Wie _normalize_all_day, gibt aber datetime midnight UTC zurück (OxiCloud-kompatibel)."""
+    s, e = _normalize_all_day(start, end)
+    return _to_midnight_utc(s), _to_midnight_utc(e)
 
 
 def _make_ical(
@@ -179,9 +191,9 @@ def _make_ical(
     ev.add("dtstamp", datetime.now(timezone.utc))
 
     if all_day:
-        s_date, e_date = _normalize_all_day(start, end)
-        ev.add("dtstart", s_date)
-        ev.add("dtend", e_date)
+        s_dt, e_dt = _normalize_all_day_utc(start, end)
+        ev.add("dtstart", s_dt)
+        ev.add("dtend", e_dt)
     else:
         ev.add("dtstart", _to_utc(start))
         ev.add("dtend", _to_utc(end))
@@ -326,11 +338,11 @@ def update_event(
             override.add("DTSTAMP", datetime.now(timezone.utc))
 
             if all_day:
-                rid_val = recurrence_id.date() if isinstance(recurrence_id, datetime) else recurrence_id
-                s_date, e_date = _normalize_all_day(start, end)
-                override.add("RECURRENCE-ID", rid_val)
-                override.add("DTSTART", s_date)
-                override.add("DTEND", e_date)
+                rid_dt = _to_midnight_utc(recurrence_id)
+                s_dt, e_dt = _normalize_all_day_utc(start, end)
+                override.add("RECURRENCE-ID", rid_dt)
+                override.add("DTSTART", s_dt)
+                override.add("DTEND", e_dt)
             else:
                 override.add("RECURRENCE-ID", _to_utc(recurrence_id))
                 override.add("DTSTART", _to_utc(start))
@@ -533,11 +545,11 @@ def _apply_move_single(
     override.add("DTSTAMP", datetime.now(timezone.utc))
 
     if all_day:
-        rid_val = recurrence_id.date() if isinstance(recurrence_id, datetime) else recurrence_id
-        s_date, e_date = _normalize_all_day(new_start, new_end)
-        override.add("RECURRENCE-ID", rid_val)
-        override.add("DTSTART", s_date)
-        override.add("DTEND", e_date)
+        rid_dt = _to_midnight_utc(recurrence_id)
+        s_dt, e_dt = _normalize_all_day_utc(new_start, new_end)
+        override.add("RECURRENCE-ID", rid_dt)
+        override.add("DTSTART", s_dt)
+        override.add("DTEND", e_dt)
     else:
         override.add("RECURRENCE-ID", _to_utc(recurrence_id))
         override.add("DTSTART", _to_utc(new_start))
@@ -570,8 +582,8 @@ def _apply_move_future(
     )
 
     if all_day:
-        rid_date = recurrence_id.date() if isinstance(recurrence_id, datetime) else recurrence_id
-        until_val = rid_date - timedelta(days=1)
+        rid_date = _to_date(recurrence_id)
+        until_val = _to_midnight_utc(rid_date - timedelta(days=1))
     else:
         rid_dt = recurrence_id if isinstance(recurrence_id, datetime) else datetime(
             recurrence_id.year, recurrence_id.month, recurrence_id.day
@@ -625,9 +637,9 @@ def _apply_move_future(
         new_ev.add("description", master["DESCRIPTION"])
 
     if all_day:
-        s_date, e_date = _normalize_all_day(new_start, new_end)
-        new_ev.add("dtstart", s_date)
-        new_ev.add("dtend", e_date)
+        s_dt, e_dt = _normalize_all_day_utc(new_start, new_end)
+        new_ev.add("dtstart", s_dt)
+        new_ev.add("dtend", e_dt)
     else:
         new_ev.add("dtstart", _to_utc(new_start))
         new_ev.add("dtend", _to_utc(new_end))
