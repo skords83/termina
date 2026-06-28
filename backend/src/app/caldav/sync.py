@@ -428,12 +428,15 @@ def _upsert_event(
         synchronize_session=False
     )
 
+    covered_rids: set = set()
+
     for ov_uid, rid_dt, ov_comp in override_components:
         if ov_uid != master_uid:
             continue
         rid_norm, _ = _parse_dt(rid_dt)
         if rid_norm is None:
             continue
+        covered_rids.add(rid_norm)
         ov_start_raw = ov_comp.get("DTSTART")
         ov_start_val = ov_start_raw.dt if ov_start_raw else None
         ov_start_dt, _ = _parse_dt(ov_start_val)
@@ -451,6 +454,23 @@ def _upsert_event(
                 description=str(ov_comp.get("DESCRIPTION", "")) or None,
             )
         )
+
+    # EXDATE → EventOverride mit start=None (= gelöschte Instanz)
+    exdates_prop = master_component.get("EXDATE")
+    if exdates_prop is not None:
+        if not isinstance(exdates_prop, list):
+            exdates_prop = [exdates_prop]
+        for ex in exdates_prop:
+            dts = ex.dts if hasattr(ex, "dts") else [ex]
+            for dt_obj in dts:
+                rid_norm, _ = _parse_dt(dt_obj.dt)
+                if rid_norm is not None and rid_norm not in covered_rids:
+                    db.add(EventOverride(
+                        master_uid=master_uid,
+                        recurrence_id=rid_norm,
+                        start=None,
+                        end=None,
+                    ))
 
 
 def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
