@@ -10,7 +10,8 @@
       "Bash(.venv/bin/python3 -m py_compile src/app/caldav/write.py)",
       "Bash(.venv/bin/python3 -m py_compile src/app/main.py)",
       "Bash(.venv/bin/python3 -m py_compile src/app/caldav/sync.py)",
-      "Bash(grep -E '\\\\.\\(ts|tsx|py|js\\)$')"
+      "Bash(grep -E '\\\\.\\(ts|tsx|py|js\\)$')",
+      "Bash(git *)"
     ]
   }
 }

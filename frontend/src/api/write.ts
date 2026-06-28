@@ -95,7 +95,8 @@ export async function deleteEvent(
   uid: string,
   payload: DeleteEventPayload
 ): Promise<void> {
-  const params = new URLSearchParams({ etag: payload.etag });
+  const params = new URLSearchParams();
+  if (payload.etag) params.set('etag', payload.etag);
   if (payload.recurrence_id) {
     params.set('recurrence_id', payload.recurrence_id);
   }

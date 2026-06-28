@@ -44,7 +44,7 @@ export interface UpdateEventPayload {
 }
 
 export interface DeleteEventPayload {
-  etag: string;
+  etag?: string | null;
   recurrence_id?: string | null;
 }
 

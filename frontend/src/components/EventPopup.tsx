@@ -321,13 +321,9 @@ export function EventPopup({
   }, [onClose]);
 
   const executeDelete = useCallback(async (recurrenceId?: string | null) => {
-    if (!event.etag) {
-      showToast("Kein ETag – Termin kann nicht gelöscht werden", "error");
-      return;
-    }
     setDeleting(true);
     try {
-      await deleteEvent(event.uid, { etag: event.etag, recurrence_id: recurrenceId });
+      await deleteEvent(event.uid, { etag: event.etag ?? undefined, recurrence_id: recurrenceId });
       showToast("Termin gelöscht", "success");
       onDeleted(event.uid, recurrenceId);
       onClose();
