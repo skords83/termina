@@ -26,7 +26,7 @@ interface Props {
   anchorPos: { x: number; y: number };
   onClose: () => void;
   onEdit: (event: CalendarEvent) => void;
-  onDeleted: (uid: string) => void;
+  onDeleted: (uid: string, recurrenceId?: string | null) => void;
 }
 
 // ── Formatierung ──────────────────────────────────────────────────────────────
@@ -329,7 +329,7 @@ export function EventPopup({
     try {
       await deleteEvent(event.uid, { etag: event.etag, recurrence_id: recurrenceId });
       showToast("Termin gelöscht", "success");
-      onDeleted(event.uid);
+      onDeleted(event.uid, recurrenceId);
       onClose();
     } catch (err) {
       const writeErr = err as WriteError;

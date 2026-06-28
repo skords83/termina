@@ -680,8 +680,12 @@ export default function App() {
             anchorPos={anchorPos}
             onClose={() => setSelectedEvent(null)}
             onEdit={(ev) => { setSelectedEvent(null); setEditModal(ev); }}
-            onDeleted={(uid) => {
-              optimistic.deleteOptimistic(uid);
+            onDeleted={(uid, recurrenceId) => {
+              if (recurrenceId) {
+                setRefreshNonce((n) => n + 1);
+              } else {
+                optimistic.deleteOptimistic(uid);
+              }
             }}
           />
         )}
