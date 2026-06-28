@@ -446,7 +446,7 @@ export function EventPopup({
     <>
       {popup}
       {recurringDeleteDialog && createPortal(
-        <div className="modal-backdrop" onClick={() => setRecurringDeleteDialog(false)}>
+        <div className="modal-backdrop" onClick={() => setRecurringDeleteDialog(false)} onMouseDown={(e) => e.nativeEvent.stopPropagation()}>
           <div className="rec-dialog" onClick={(e) => e.stopPropagation()}>
             <div className="rec-dialog-header">
               <h3 className="rec-dialog-title">Termin löschen</h3>
