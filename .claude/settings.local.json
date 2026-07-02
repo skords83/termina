@@ -12,7 +12,11 @@
       "Bash(.venv/bin/python3 -m py_compile src/app/caldav/sync.py)",
       "Bash(grep -E '\\\\.\\(ts|tsx|py|js\\)$')",
       "Bash(git *)",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(grep -E '\\\\.\\(ts|tsx|js|jsx|css|json\\)$')",
+      "Bash(node *)",
+      "mcp__headroom__headroom_retrieve",
+      "Bash(mkdir -p .impeccable)"
     ]
   }
 }

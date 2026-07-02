@@ -1,0 +1,215 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-02T00:00:00Z",
+  "title": "Design System: Termina",
+  "extensions": {
+    "colorMeta": {
+      "signal-blue": {
+        "role": "primary",
+        "displayName": "Signal Blue",
+        "canonical": "oklch(60% 0.19 264)",
+        "tonalRamp": [
+          "oklch(20% 0.08 264)",
+          "oklch(30% 0.12 264)",
+          "oklch(40% 0.16 264)",
+          "oklch(50% 0.19 264)",
+          "oklch(60% 0.19 264)",
+          "oklch(70% 0.15 264)",
+          "oklch(80% 0.10 264)",
+          "oklch(90% 0.05 264)"
+        ]
+      },
+      "ink-black": {
+        "role": "neutral",
+        "displayName": "Ink Black",
+        "canonical": "oklch(15% 0.006 260)",
+        "tonalRamp": [
+          "oklch(10% 0.004 260)",
+          "oklch(15% 0.006 260)",
+          "oklch(19% 0.007 260)",
+          "oklch(23% 0.008 260)",
+          "oklch(30% 0.009 260)",
+          "oklch(45% 0.012 260)",
+          "oklch(65% 0.012 260)",
+          "oklch(85% 0.008 260)"
+        ]
+      },
+      "panel-charcoal": {
+        "role": "neutral",
+        "displayName": "Panel Charcoal",
+        "canonical": "oklch(19% 0.007 260)",
+        "tonalRamp": [
+          "oklch(10% 0.004 260)",
+          "oklch(15% 0.006 260)",
+          "oklch(19% 0.007 260)",
+          "oklch(23% 0.008 260)",
+          "oklch(30% 0.009 260)",
+          "oklch(45% 0.012 260)",
+          "oklch(65% 0.012 260)",
+          "oklch(85% 0.008 260)"
+        ]
+      },
+      "graphite-surface": {
+        "role": "neutral",
+        "displayName": "Graphite Surface",
+        "canonical": "oklch(23% 0.009 260)",
+        "tonalRamp": [
+          "oklch(10% 0.004 260)",
+          "oklch(15% 0.006 260)",
+          "oklch(19% 0.007 260)",
+          "oklch(23% 0.009 260)",
+          "oklch(30% 0.01 260)",
+          "oklch(45% 0.012 260)",
+          "oklch(65% 0.012 260)",
+          "oklch(85% 0.008 260)"
+        ]
+      },
+      "cool-white": {
+        "role": "neutral",
+        "displayName": "Cool White",
+        "canonical": "oklch(92% 0.008 260)",
+        "tonalRamp": [
+          "oklch(10% 0.004 260)",
+          "oklch(20% 0.006 260)",
+          "oklch(35% 0.008 260)",
+          "oklch(50% 0.01 260)",
+          "oklch(65% 0.01 260)",
+          "oklch(80% 0.009 260)",
+          "oklch(88% 0.008 260)",
+          "oklch(92% 0.008 260)"
+        ]
+      },
+      "slate-gray": {
+        "role": "neutral",
+        "displayName": "Slate Gray",
+        "canonical": "oklch(63% 0.015 264)",
+        "tonalRamp": [
+          "oklch(15% 0.01 264)",
+          "oklch(25% 0.012 264)",
+          "oklch(38% 0.014 264)",
+          "oklch(50% 0.015 264)",
+          "oklch(63% 0.015 264)",
+          "oklch(75% 0.013 264)",
+          "oklch(85% 0.01 264)",
+          "oklch(93% 0.006 264)"
+        ]
+      },
+      "alert-coral": {
+        "role": "semantic-error",
+        "displayName": "Alert Coral",
+        "canonical": "oklch(70% 0.16 20)",
+        "tonalRamp": [
+          "oklch(25% 0.08 20)",
+          "oklch(35% 0.11 20)",
+          "oklch(45% 0.14 20)",
+          "oklch(55% 0.16 20)",
+          "oklch(70% 0.16 20)",
+          "oklch(80% 0.12 20)",
+          "oklch(88% 0.07 20)",
+          "oklch(94% 0.03 20)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Popup/modal titles — the event name at the top of the event popup." },
+      "title": { "displayName": "Title", "purpose": "Section headings inside modals (\"New Event\", \"Search\")." },
+      "body": { "displayName": "Body", "purpose": "Default UI text — labels, descriptions, form text, base html/body size." },
+      "label": { "displayName": "Label", "purpose": "Uppercase structural chrome — sidebar section headers." },
+      "numeric": { "displayName": "Numeric", "purpose": "Clock times, day numbers, durations — anything fundamentally a number." }
+    },
+    "shadows": [
+      { "name": "popup", "value": "0 8px 32px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.3)", "purpose": "The event detail popup — moderate lift with a soft outer shadow and a tighter contact shadow." },
+      { "name": "modal", "value": "0 24px 48px rgba(0,0,0,0.5)", "purpose": "Full modals (event form, search) that block the whole screen." },
+      { "name": "dragging", "value": "0 16px 48px rgba(0,0,0,0.6)", "purpose": "An event card mid-drag — the strongest shadow in the system." },
+      { "name": "chrome", "value": "0 1px 3px rgba(0,0,0,0.35)", "purpose": "Hairline lift on small floating chrome like a raised nav button." }
+    ],
+    "motion": [
+      { "name": "state-change", "value": "all 0.15s ease", "purpose": "Default transition for hover/focus/opacity state changes across buttons, inputs, and nav rows." },
+      { "name": "quick-shift", "value": "all 0.1s ease", "purpose": "Faster transition for small chrome elements (dots, icons, toggles)." }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one committing action per view — Save, Log in.",
+      "html": "<button class=\"ds-btn-primary\">Save</button>",
+      "css": ".ds-btn-primary { background: var(--accent, #4f7ef8); color: #ffffff; font-family: 'DM Sans', system-ui, sans-serif; font-size: 13px; font-weight: 600; padding: 9px 16px; border: none; border-radius: var(--radius, 6px); cursor: pointer; transition: opacity 0.15s ease; } .ds-btn-primary:hover { opacity: 0.88; } .ds-btn-primary:focus-visible { outline: 2px solid var(--accent, #4f7ef8); outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Non-committal actions — Cancel, dismiss.",
+      "html": "<button class=\"ds-btn-secondary\">Cancel</button>",
+      "css": ".ds-btn-secondary { background: transparent; color: var(--text-2, #9095a8); font-family: 'DM Sans', system-ui, sans-serif; font-size: 13px; font-weight: 500; padding: 9px 16px; border: none; border-radius: var(--radius, 6px); cursor: pointer; transition: background 0.15s ease, color 0.15s ease; } .ds-btn-secondary:hover { background: var(--bg-hover, #23262f); color: var(--text, #e8eaf0); } .ds-btn-secondary:focus-visible { outline: 2px solid var(--accent, #4f7ef8); outline-offset: 2px; }"
+    },
+    {
+      "name": "Icon Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Circular chrome button — close, more-options, small toolbar actions.",
+      "html": "<button class=\"ds-btn-icon\" aria-label=\"Close\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\"><path d=\"M4 4L12 12M12 4L4 12\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/></svg></button>",
+      "css": ".ds-btn-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; background: transparent; color: var(--text-2, #9095a8); border: none; border-radius: 50%; cursor: pointer; transition: background 0.1s ease, color 0.1s ease; } .ds-btn-icon:hover { background: var(--bg-hover, #23262f); color: var(--text, #e8eaf0); } .ds-btn-icon:focus-visible { outline: 2px solid var(--accent, #4f7ef8); outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Standard form field — event title, search box, login fields.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Event title\" />",
+      "css": ".ds-input { display: block; width: 100%; background: var(--bg-3, #1e2028); color: var(--text, #e8eaf0); font-family: 'DM Sans', system-ui, sans-serif; font-size: 13px; padding: 9px 12px; border: 1px solid var(--border, #2a2d38); border-radius: var(--radius, 6px); transition: border-color 0.15s ease; } .ds-input::placeholder { color: var(--text-3, #5c6070); } .ds-input:focus { outline: none; border-color: var(--accent, #4f7ef8); }"
+    },
+    {
+      "name": "Sidebar Nav Item",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "A row in the sidebar — view switcher or calendar toggle.",
+      "html": "<button class=\"ds-nav-item ds-nav-item--active\"><span class=\"ds-nav-dot\"></span>Work</button>",
+      "css": ".ds-nav-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; background: transparent; color: var(--text-2, #9095a8); font-family: 'DM Sans', system-ui, sans-serif; font-size: 13px; font-weight: 500; border: none; border-radius: var(--radius, 6px); cursor: pointer; text-align: left; transition: background 0.1s ease, color 0.1s ease; } .ds-nav-item:hover { background: var(--bg-hover, #23262f); color: var(--text, #e8eaf0); } .ds-nav-item--active { background: rgba(79, 126, 248, 0.15); color: var(--accent, #4f7ef8); } .ds-nav-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent, #4f7ef8); flex-shrink: 0; }"
+    },
+    {
+      "name": "Event Chip",
+      "kind": "custom",
+      "refersTo": "event-chip",
+      "description": "A scheduled event on the calendar grid, color-coded by its source calendar (functional, not decorative — see The Calendar-Owns-Its-Color Rule).",
+      "html": "<div class=\"ds-event-chip\">Design review, 2:00pm</div>",
+      "css": ".ds-event-chip { display: block; padding: 4px 8px; background: rgba(79, 126, 248, 0.14); color: var(--text, #e8eaf0); font-family: 'DM Sans', system-ui, sans-serif; font-size: 12px; border-left: 2.5px solid var(--accent, #4f7ef8); border-radius: var(--radius, 6px); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Warm Signal",
+    "overview": "Termina is a dark, quiet workspace with one deliberate point of warmth. The system is built for a single owner doing a fast glance-and-plan loop against their own Nextcloud calendar — every surface stays low-contrast and out of the way (ink-black backgrounds, graphite panels, restrained slate text) so the schedule itself is the only thing competing for attention. Signal Blue is the one color allowed to carry emotional weight: it marks today, the accent action, the thing currently in focus. It is not decoration, it is the system's single named signal in an otherwise hushed field. This is explicitly not a SaaS admin dashboard, and not a cold developer terminal either. PRODUCT.md calls for \"warm and personal, not clinical\" — Termina answers that by staying structurally precise (tight radii, mono numerals, minimal chrome) while keeping the emotional register calm and human at the edges: soft hover states, a gentle blue wash rather than hard highlights, generous line-height on body text. It should feel like checking a well-kept desk calendar in low evening light, not opening an ops console. It should also stay legible to the muscle memory of Google Calendar / Apple Calendar — familiar grid, familiar event chips, familiar color-coding — because relearning a calendar is friction the owner never asked for.",
+    "keyCharacteristics": [
+      "Near-black neutral field (ink-black → panel-charcoal → graphite-surface) with almost no saturation outside the accent.",
+      "Exactly one system accent (Signal Blue, #4f7ef8) used sparingly for focus, action, and \"today.\"",
+      "Calendar-native color-coding on events is data-driven, not part of the palette — each Nextcloud calendar owns its own hue.",
+      "DM Sans for everything conversational, DM Mono for anything numeric (times, dates, durations).",
+      "Flat by default; elevation only appears on things that are literally floating above the grid (popups, modals, a dragged event)."
+    ],
+    "rules": [
+      { "name": "The One Signal Rule", "body": "Signal Blue is the only saturated color the design system itself contributes. If a screen needs a second \"important\" color, that's a sign something should be de-emphasized instead, not a cue to add a second accent.", "section": "colors" },
+      { "name": "The Calendar-Owns-Its-Color Rule", "body": "Event and calendar-list colors come from the user's Nextcloud calendars, not from this palette. They render as a small dot next to the calendar name and as a left edge on event chips/cards (2–3px), mirroring Google/Apple Calendar. This is functional data encoding, not a decorative accent border.", "section": "colors" },
+      { "name": "The Numbers-Are-Mono Rule", "body": "Anything that is a clock time, date, or duration renders in DM Mono, even inline in otherwise-Sans text.", "section": "typography" },
+      { "name": "The Floating-Only Rule", "body": "Shadows are prohibited on anything still part of the normal page flow (cells, chips, sidebar rows, static cards). They're reserved entirely for things temporarily above the grid: popups, modals, drag state.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep Signal Blue (#4f7ef8) as the only system-contributed accent — reserve it for today, focus, links, and the single primary action per view.",
+      "Do let per-calendar CalDAV colors own event/calendar-list color; treat them as data, not palette.",
+      "Do use DM Mono for any clock time, date, or duration, even inline in Sans text.",
+      "Do keep the calendar grid, sidebar rows, and event chips flat — shadows are reserved for popups, modals, and drag state only.",
+      "Do default to Google/Apple Calendar-familiar interaction patterns for the core scheduling grid.",
+      "Do push warmth through hover states, the accent, and motion — components can stay structurally precise and quiet without needing softer shapes to feel human."
+    ],
+    "donts": [
+      "Don't add a second saturated system accent alongside Signal Blue.",
+      "Don't add decorative border-left/border-right accents anywhere except the functional per-calendar event-color edge already documented.",
+      "Don't reach for a generic SaaS admin dashboard look — identical card grids, hero-metric tiles, tiny uppercase eyebrow labels above every section.",
+      "Don't let the system drift toward cold \"dev tool\" starkness — if a new screen feels like an admin panel or a terminal rather than a calendar, that's a regression.",
+      "Don't invent new calendar-grid interaction patterns that require relearning; match Google/Apple Calendar conventions unless there's a concrete reason to diverge.",
+      "Don't use glow/ring focus effects — focus and hover feedback in this system is color-shift and opacity only."
+    ]
+  }
+}

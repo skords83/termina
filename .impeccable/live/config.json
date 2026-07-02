@@ -1,0 +1,6 @@
+{
+  "files": ["frontend/index.html"],
+  "insertBefore": "html",
+  "commentSyntax": "html",
+  "cspChecked": true
+}
