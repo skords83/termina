@@ -16,7 +16,27 @@
       "Bash(grep -E '\\\\.\\(ts|tsx|js|jsx|css|json\\)$')",
       "Bash(node *)",
       "mcp__headroom__headroom_retrieve",
-      "Bash(mkdir -p .impeccable)"
+      "Bash(mkdir -p .impeccable)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/healthz)",
+      "Bash(docker compose *)",
+      "Bash(nohup npm run dev -- --port 5173 --strictPort)",
+      "Bash(disown)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173)",
+      "Bash(node /home/skords/.claude/skills/impeccable/scripts/detect.mjs --json frontend/src)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(grep -n -i \"event-color\\\\|border-left\\\\|side-tab\" DESIGN.md)",
+      "Bash(grep -rn -i \"event-color\" frontend/DESIGN.md)",
+      "Bash(find . -iname \"DESIGN.md\")",
+      "Bash(tee /tmp/claude-1000/-home-skords-Dokumente-Projekte-termina/8c15d8c6-7dcc-4dcd-a065-e0c2c5ac5672/scratchpad/live-server.log)",
+      "Bash(kill 370488)",
+      "Bash(IMPECCABLE_CRITIQUE_META='{\"target\":\"frontend/src\",\"total_score\":25,\"p0_count\":0,\"p1_count\":5}' node /home/skords/.claude/skills/impeccable/scripts/critique-storage.mjs write frontend-src \"/tmp/claude-1000/-home-skords-Dokumente-Projekte-termina/8c15d8c6-7dcc-4dcd-a065-e0c2c5ac5672/scratchpad/critique-frontend-src.md\")",
+      "Bash(pkill -f \"vite.*--port 5173\")",
+      "Bash(xargs ls -la)",
+      "Bash(npx eslint *)",
+      "Bash(xargs ls)",
+      "Bash(ps -p 377357 -o pid,ppid,cmd --no-headers)",
+      "Bash(ps -p 380643 -o pid,ppid,cmd --no-headers)"
     ]
   }
 }

@@ -582,3 +582,361 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   BUTTONS (shared)
+   ═══════════════════════════════════════════════════════════════════ */
+
+.btn-primary,
+.btn-secondary {
+  border-radius: var(--radius);
+  padding: 9px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font);
+  transition: opacity 0.15s;
+}
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+}
+.btn-secondary {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+.btn-primary:hover:not(:disabled),
+.btn-secondary:hover:not(:disabled) { opacity: 0.88; }
+.btn-primary:disabled,
+.btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   EVENT FORM MODAL
+   ═══════════════════════════════════════════════════════════════════ */
+
+.form-modal {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 384px;
+  padding: 20px 20px 16px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: form-modal-in 0.14s ease;
+}
+@keyframes form-modal-in {
+  from { opacity: 0; transform: scale(0.97) translateY(6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .form-modal { animation: none; }
+}
+
+.form-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.form-modal-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--text);
+}
+
+.form-modal-close {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 20px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  transition: color 0.1s, background 0.1s;
+}
+.form-modal-close:hover { color: var(--text); background: var(--bg-hover); }
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.form-sublabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.form-input,
+.form-textarea,
+.form-select {
+  width: 100%;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 9px 12px;
+  font-size: 14px;
+  font-family: var(--font);
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.form-input:focus,
+.form-textarea:focus,
+.form-select:focus { border-color: var(--accent); }
+.form-input::placeholder,
+.form-textarea::placeholder { color: var(--text-3); }
+.form-select { cursor: pointer; }
+
+.form-textarea {
+  resize: vertical;
+  min-height: 64px;
+}
+
+.form-time-input {
+  width: 92px;
+  flex-shrink: 0;
+  padding: 9px 8px;
+  font-family: var(--mono);
+  color-scheme: dark;
+}
+.form-time-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.4);
+  cursor: pointer;
+}
+
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 12px;
+}
+
+.form-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.form-date-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.form-date-row-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  width: 28px;
+  flex-shrink: 0;
+}
+
+.form-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.form-toggle-checkbox {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.form-toggle-label {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.form-recur-note {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.4;
+}
+
+.form-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.form-modal-close:focus-visible,
+.form-input:focus-visible,
+.form-select:focus-visible,
+.form-textarea:focus-visible,
+.form-toggle-checkbox:focus-visible,
+.btn-primary:focus-visible,
+.btn-secondary:focus-visible,
+.date-picker-trigger:focus-visible,
+.date-picker-nav:focus-visible,
+.date-picker-day:focus-visible,
+.date-picker-footer-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ─── Custom date picker ─────────────────────────────────────── */
+
+.date-picker { position: relative; }
+
+.date-picker-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 9px 10px;
+  font-size: 13px;
+  font-family: var(--mono);
+  cursor: pointer;
+  text-align: left;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.date-picker-trigger:hover:not(:disabled) { border-color: var(--text-3); }
+.date-picker-trigger--open { border-color: var(--accent); }
+.date-picker-trigger:disabled { opacity: 0.4; cursor: default; }
+
+.date-picker-trigger-icon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.date-picker-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+  width: 240px;
+  overflow: hidden;
+  animation: date-picker-in 0.12s ease;
+}
+@keyframes date-picker-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .date-picker-panel { animation: none; }
+}
+
+.date-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.date-picker-month {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.date-picker-nav {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: color 0.1s, background 0.1s;
+}
+.date-picker-nav:hover { color: var(--text); background: var(--bg-hover); }
+
+.date-picker-weekrow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  padding: 6px 8px 2px;
+}
+
+.date-picker-weekday {
+  font-size: 11px;
+  color: var(--text-3);
+  text-align: center;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+
+.date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  padding: 2px 8px 8px;
+  gap: 1px;
+}
+
+.date-picker-day {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-family: var(--mono);
+  padding: 5px 0;
+  cursor: pointer;
+  text-align: center;
+  line-height: 1.2;
+  transition: background 0.08s, color 0.08s;
+}
+.date-picker-day:hover:not(:disabled) { background: var(--bg-hover); }
+.date-picker-day--selected,
+.date-picker-day--selected:hover { background: var(--accent); color: #fff; font-weight: 600; }
+.date-picker-day--today { color: var(--accent); font-weight: 600; box-shadow: inset 0 0 0 1px var(--accent); }
+.date-picker-day--muted { color: var(--text-3); opacity: 0.5; }
+.date-picker-day--disabled { color: var(--text-3); opacity: 0.3; cursor: default; }
+
+.date-picker-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.date-picker-footer-btn {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: 13px;
+  font-family: var(--font);
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.date-picker-footer-btn:hover { color: var(--text); }
+.date-picker-footer-btn--accent { color: var(--accent); }

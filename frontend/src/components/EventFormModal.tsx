@@ -110,11 +110,11 @@ function localDatetimeToISO(localStr: string): string {
 
 function makeDefaultStart(defaultDate?: string): string {
   if (defaultDate) return `${defaultDate}T09:00`;
-  const now = new Date();
+  const inOneHour = new Date(Date.now() + 60 * 60 * 1000);
   const pad = (n: number) => String(n).padStart(2, "0");
   return (
-    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
-    `T${pad(now.getHours() + 1)}:00`
+    `${inOneHour.getFullYear()}-${pad(inOneHour.getMonth() + 1)}-${pad(inOneHour.getDate())}` +
+    `T${pad(inOneHour.getHours())}:00`
   );
 }
 
@@ -254,24 +254,20 @@ function DatePicker({ value, min, onChange, disabled }: DatePickerProps) {
   const displayValue = value ? `${pad(d)}.${pad(m)}.${y}` : "–";
 
   return (
-    <div ref={containerRef} style={{ position: "relative" }}>
+    <div ref={containerRef} className="date-picker">
       {/* Trigger */}
       <button
         type="button"
         disabled={disabled}
         onClick={() => !disabled && setOpen((o) => !o)}
-        style={{
-          ...dpS.trigger,
-          ...(disabled ? { opacity: 0.4, cursor: "default" } : {}),
-          ...(open ? { borderColor: "#5b8ef7" } : {}),
-        }}
+        className={`date-picker-trigger${open ? " date-picker-trigger--open" : ""}`}
       >
         <svg
           width="13"
           height="13"
           viewBox="0 0 16 16"
           fill="none"
-          style={{ flexShrink: 0, color: "#666" }}
+          className="date-picker-trigger-icon"
         >
           <rect
             x="1"
@@ -294,10 +290,15 @@ function DatePicker({ value, min, onChange, disabled }: DatePickerProps) {
 
       {/* Dropdown */}
       {open && (
-        <div style={dpS.panel}>
+        <div className="date-picker-panel">
           {/* Header */}
-          <div style={dpS.header}>
-            <button type="button" style={dpS.navBtn} onClick={prevMonth}>
+          <div className="date-picker-header">
+            <button
+              type="button"
+              className="date-picker-nav"
+              onClick={prevMonth}
+              aria-label="Vorheriger Monat"
+            >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                 <path
                   d="M8 2L4 6l4 4"
@@ -308,10 +309,15 @@ function DatePicker({ value, min, onChange, disabled }: DatePickerProps) {
                 />
               </svg>
             </button>
-            <span style={dpS.monthLabel}>
+            <span className="date-picker-month">
               {DE_MONTHS[viewMonth]} {viewYear}
             </span>
-            <button type="button" style={dpS.navBtn} onClick={nextMonth}>
+            <button
+              type="button"
+              className="date-picker-nav"
+              onClick={nextMonth}
+              aria-label="Nächster Monat"
+            >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                 <path
                   d="M4 2l4 4-4 4"
@@ -325,20 +331,29 @@ function DatePicker({ value, min, onChange, disabled }: DatePickerProps) {
           </div>
 
           {/* Wochentag-Header */}
-          <div style={dpS.weekRow}>
+          <div className="date-picker-weekrow">
             {DE_DAYS_SHORT.map((dn) => (
-              <div key={dn} style={dpS.weekLabel}>
+              <div key={dn} className="date-picker-weekday">
                 {dn}
               </div>
             ))}
           </div>
 
           {/* Tage */}
-          <div style={dpS.grid}>
+          <div className="date-picker-grid">
             {cells.map(({ dateStr, inMonth }) => {
               const isSelected = dateStr === value;
               const isToday = dateStr === todayStr;
               const isDisabled = !!min && dateStr < min;
+              const classes = [
+                "date-picker-day",
+                isSelected && "date-picker-day--selected",
+                !isSelected && isToday && "date-picker-day--today",
+                !inMonth && "date-picker-day--muted",
+                isDisabled && "date-picker-day--disabled",
+              ]
+                .filter(Boolean)
+                .join(" ");
               return (
                 <button
                   key={dateStr}
@@ -350,13 +365,9 @@ function DatePicker({ value, min, onChange, disabled }: DatePickerProps) {
                       setOpen(false);
                     }
                   }}
-                  style={{
-                    ...dpS.day,
-                    ...(isSelected ? dpS.daySelected : {}),
-                    ...(!isSelected && isToday ? dpS.dayToday : {}),
-                    ...(!inMonth ? dpS.dayMuted : {}),
-                    ...(isDisabled ? dpS.dayDisabled : {}),
-                  }}
+                  className={classes}
+                  aria-current={isToday ? "date" : undefined}
+                  aria-label={dateStr}
                 >
                   {parseInt(dateStr.split("-")[2], 10)}
                 </button>
@@ -365,10 +376,10 @@ function DatePicker({ value, min, onChange, disabled }: DatePickerProps) {
           </div>
 
           {/* Footer */}
-          <div style={dpS.footer}>
+          <div className="date-picker-footer">
             <button
               type="button"
-              style={dpS.footerBtn}
+              className="date-picker-footer-btn"
               onClick={() => {
                 onChange("");
                 setOpen(false);
@@ -378,7 +389,7 @@ function DatePicker({ value, min, onChange, disabled }: DatePickerProps) {
             </button>
             <button
               type="button"
-              style={{ ...dpS.footerBtn, color: "#5b8ef7" }}
+              className="date-picker-footer-btn date-picker-footer-btn--accent"
               onClick={() => {
                 onChange(todayStr);
                 setOpen(false);
@@ -393,397 +404,6 @@ function DatePicker({ value, min, onChange, disabled }: DatePickerProps) {
   );
 }
 
-const dpS = {
-  trigger: {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    width: "100%",
-    background: "#151515",
-    border: "1px solid #2e2e2e",
-    borderRadius: "0.375rem",
-    color: "#e8e6e3",
-    padding: "0.5rem 0.625rem",
-    fontSize: "0.875rem",
-    fontFamily: "DM Sans, sans-serif",
-    cursor: "pointer",
-    textAlign: "left" as const,
-    transition: "border-color 0.12s",
-    boxSizing: "border-box" as const,
-  },
-  panel: {
-    position: "absolute" as const,
-    top: "calc(100% + 4px)",
-    left: 0,
-    zIndex: 2000,
-    background: "#1a1a1a",
-    border: "1px solid #2e2e2e",
-    borderRadius: "0.625rem",
-    boxShadow: "0 12px 40px rgba(0,0,0,0.7)",
-    width: "240px",
-    overflow: "hidden",
-    animation: "dp-in 0.1s ease",
-  },
-  header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "10px 12px 8px",
-    borderBottom: "1px solid #242424",
-  },
-  monthLabel: {
-    fontSize: "0.8125rem",
-    fontWeight: 600,
-    color: "#e0dedd",
-    letterSpacing: "-0.01em",
-  },
-  navBtn: {
-    background: "none",
-    border: "none",
-    color: "#888",
-    cursor: "pointer",
-    padding: "4px 6px",
-    borderRadius: "4px",
-    display: "flex",
-    alignItems: "center",
-    transition: "color 0.1s",
-  },
-  weekRow: {
-    display: "grid",
-    gridTemplateColumns: "repeat(7, 1fr)",
-    padding: "6px 8px 2px",
-  },
-  weekLabel: {
-    fontSize: "0.6875rem",
-    color: "#555",
-    textAlign: "center" as const,
-    fontWeight: 500,
-    letterSpacing: "0.03em",
-  },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(7, 1fr)",
-    padding: "2px 8px 8px",
-    gap: "1px",
-  },
-  day: {
-    background: "none",
-    border: "none",
-    borderRadius: "4px",
-    color: "#ccc",
-    fontSize: "0.8125rem",
-    padding: "5px 0",
-    cursor: "pointer",
-    textAlign: "center" as const,
-    fontFamily: "DM Sans, sans-serif",
-    transition: "background 0.08s, color 0.08s",
-    lineHeight: 1.2,
-  },
-  daySelected: {
-    background: "#5b8ef7",
-    color: "#fff",
-    fontWeight: 600,
-  },
-  dayToday: {
-    color: "#5b8ef7",
-    fontWeight: 600,
-  },
-  dayMuted: {
-    color: "#444",
-  },
-  dayDisabled: {
-    color: "#333",
-    cursor: "default",
-  },
-  footer: {
-    display: "flex",
-    justifyContent: "space-between",
-    padding: "8px 12px",
-    borderTop: "1px solid #242424",
-  },
-  footerBtn: {
-    background: "none",
-    border: "none",
-    color: "#666",
-    fontSize: "0.8125rem",
-    cursor: "pointer",
-    fontFamily: "DM Sans, sans-serif",
-    padding: "2px 4px",
-  },
-};
-
-// ── Styles ────────────────────────────────────────────────────────────────────
-
-const S = {
-  overlay: {
-    position: "fixed" as const,
-    inset: 0,
-    background: "rgba(0,0,0,0.55)",
-    backdropFilter: "blur(2px)",
-    zIndex: 1000,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modal: {
-    background: "#1e1e1e",
-    border: "1px solid #2e2e2e",
-    borderRadius: "0.75rem",
-    width: "100%",
-    maxWidth: "24rem",
-    padding: "1.25rem 1.25rem 1rem",
-    boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
-    fontFamily: "DM Sans, sans-serif",
-    color: "#e8e6e3",
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "0.875rem",
-    maxHeight: "90vh",
-    overflowY: "auto" as const,
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  title: {
-    fontSize: "1rem",
-    fontWeight: 600,
-    letterSpacing: "-0.01em",
-    color: "#f0eeeb",
-    margin: 0,
-  },
-  closeBtn: {
-    background: "none",
-    border: "none",
-    color: "#666",
-    fontSize: "1.25rem",
-    cursor: "pointer",
-    lineHeight: 1,
-    padding: "0.125rem 0.25rem",
-    borderRadius: "0.25rem",
-  },
-  field: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "0.375rem",
-  },
-  label: {
-    fontSize: "0.75rem",
-    fontWeight: 500,
-    color: "#888",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.06em",
-  },
-  sublabel: {
-    fontSize: "0.75rem",
-    fontWeight: 500,
-    color: "#777",
-  },
-  input: {
-    background: "#151515",
-    border: "1px solid #2e2e2e",
-    borderRadius: "0.375rem",
-    color: "#e8e6e3",
-    padding: "0.5rem 0.625rem",
-    fontSize: "0.875rem",
-    fontFamily: "DM Sans, sans-serif",
-    outline: "none",
-    width: "100%",
-    boxSizing: "border-box" as const,
-  },
-  textarea: {
-    background: "#151515",
-    border: "1px solid #2e2e2e",
-    borderRadius: "0.375rem",
-    color: "#e8e6e3",
-    padding: "0.5rem 0.625rem",
-    fontSize: "0.875rem",
-    fontFamily: "DM Sans, sans-serif",
-    outline: "none",
-    width: "100%",
-    boxSizing: "border-box" as const,
-    resize: "vertical" as const,
-    minHeight: "4rem",
-  },
-  select: {
-    background: "#151515",
-    border: "1px solid #2e2e2e",
-    borderRadius: "0.375rem",
-    color: "#e8e6e3",
-    padding: "0.5rem 0.625rem",
-    fontSize: "0.875rem",
-    fontFamily: "DM Sans, sans-serif",
-    outline: "none",
-    width: "100%",
-    cursor: "pointer",
-  },
-  row: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "0.625rem",
-  },
-  dateSection: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "0.5rem",
-    background: "#181818",
-    border: "1px solid #2a2a2a",
-    borderRadius: "0.5rem",
-    padding: "0.625rem 0.75rem",
-  },
-  dateRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.625rem",
-  },
-  dateLabel: {
-    fontSize: "0.75rem",
-    fontWeight: 500,
-    color: "#888",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.06em",
-    width: "1.75rem",
-    flexShrink: 0,
-  },
-  toggle: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.5rem",
-    cursor: "pointer",
-    userSelect: "none" as const,
-  },
-  toggleInline: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.375rem",
-    cursor: "pointer",
-    userSelect: "none" as const,
-  },
-  toggleCheckbox: {
-    width: "0.875rem",
-    height: "0.875rem",
-    cursor: "pointer",
-    accentColor: "#5b8ef7",
-  },
-  toggleLabel: {
-    fontSize: "0.875rem",
-    color: "#aaa",
-  },
-  toggleLabelSmall: {
-    fontSize: "0.75rem",
-    color: "#888",
-  },
-  divider: {
-    borderTop: "1px solid #2a2a2a",
-    margin: "0.25rem 0",
-  },
-  recurBox: {
-    background: "#181818",
-    border: "1px solid #2a2a2a",
-    borderRadius: "0.5rem",
-    padding: "0.75rem",
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "0.625rem",
-  },
-  recurRow: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "0.625rem",
-  },
-  footer: {
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: "0.5rem",
-    paddingTop: "0.25rem",
-  },
-  btnCancel: {
-    background: "none",
-    border: "1px solid #2e2e2e",
-    borderRadius: "0.375rem",
-    color: "#888",
-    padding: "0.5rem 1rem",
-    fontSize: "0.875rem",
-    fontFamily: "DM Sans, sans-serif",
-    cursor: "pointer",
-  },
-  btnSave: {
-    background: "#5b8ef7",
-    border: "none",
-    borderRadius: "0.375rem",
-    color: "#fff",
-    padding: "0.5rem 1.25rem",
-    fontSize: "0.875rem",
-    fontFamily: "DM Sans, sans-serif",
-    fontWeight: 500,
-    cursor: "pointer",
-  },
-  btnSaveDisabled: {
-    opacity: 0.5,
-    cursor: "not-allowed",
-  },
-  scopeOverlay: {
-    position: "fixed" as const,
-    inset: 0,
-    background: "rgba(0,0,0,0.65)",
-    backdropFilter: "blur(2px)",
-    zIndex: 1100,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  scopeBox: {
-    background: "#1e1e1e",
-    border: "1px solid #2e2e2e",
-    borderRadius: "0.75rem",
-    padding: "1.5rem",
-    width: "100%",
-    maxWidth: "22rem",
-    boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
-    fontFamily: "DM Sans, sans-serif",
-    color: "#e8e6e3",
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "1rem",
-  },
-  scopeTitle: {
-    fontSize: "0.9375rem",
-    fontWeight: 600,
-    color: "#f0eeeb",
-    margin: 0,
-  },
-  scopeSubtitle: {
-    fontSize: "0.8125rem",
-    color: "#777",
-    margin: "-0.5rem 0 0",
-  },
-  scopeOptions: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "0.375rem",
-  },
-  scopeOption: (active: boolean) => ({
-    background: active ? "rgba(91,142,247,0.12)" : "#151515",
-    border: `1px solid ${active ? "#5b8ef7" : "#2e2e2e"}`,
-    borderRadius: "0.375rem",
-    color: active ? "#a8c4fb" : "#ccc",
-    padding: "0.625rem 0.875rem",
-    fontSize: "0.875rem",
-    fontFamily: "DM Sans, sans-serif",
-    cursor: "pointer",
-    textAlign: "left" as const,
-    transition: "all 0.1s",
-  }),
-  scopeFooter: {
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: "0.5rem",
-    borderTop: "1px solid #2a2a2a",
-    paddingTop: "0.75rem",
-  },
-};
-
 // ── Scope-Dialog ──────────────────────────────────────────────────────────────
 
 type EditScope = "single" | "all";
@@ -794,35 +414,40 @@ interface ScopeDialogProps {
 }
 
 function ScopeDialog({ onSelect, onCancel }: ScopeDialogProps) {
-  const [selected, setSelected] = useState<EditScope>("single");
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onCancel]);
 
   return (
-    <div style={S.scopeOverlay}>
-      <div style={S.scopeBox}>
-        <div>
-          <h2 style={S.scopeTitle}>Serientermin bearbeiten</h2>
-          <p style={S.scopeSubtitle}>Welche Termine sollen geändert werden?</p>
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="rec-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="rec-dialog-header">
+          <h3 className="rec-dialog-title">Serientermin bearbeiten</h3>
+          <p className="rec-dialog-sub">
+            Welche Termine sollen geändert werden?
+          </p>
         </div>
-        <div style={S.scopeOptions}>
-          <button
-            style={S.scopeOption(selected === "single")}
-            onClick={() => setSelected("single")}
-          >
-            Nur dieser Termin
+        <div className="rec-dialog-options">
+          <button className="rec-option" onClick={() => onSelect("single")}>
+            <div className="rec-option-title">Nur dieser Termin</div>
+            <div className="rec-option-desc">
+              Nur diese eine Instanz wird geändert. Die Serie bleibt bestehen.
+            </div>
           </button>
-          <button
-            style={S.scopeOption(selected === "all")}
-            onClick={() => setSelected("all")}
-          >
-            Alle Termine der Serie
+          <button className="rec-option" onClick={() => onSelect("all")}>
+            <div className="rec-option-title">Alle Termine der Serie</div>
+            <div className="rec-option-desc">
+              Änderungen gelten für alle Termine der Serie.
+            </div>
           </button>
         </div>
-        <div style={S.scopeFooter}>
-          <button style={S.btnCancel} onClick={onCancel}>
+        <div className="rec-dialog-footer">
+          <button className="rec-cancel" onClick={onCancel}>
             Abbrechen
-          </button>
-          <button style={S.btnSave} onClick={() => onSelect(selected)}>
-            Weiter
           </button>
         </div>
       </div>
@@ -889,13 +514,7 @@ function DateTimeField({
         value={timePart}
         disabled={disabled}
         onChange={(e) => handleTimeChange(e.target.value)}
-        style={{
-          ...S.input,
-          width: "92px",
-          flexShrink: 0,
-          padding: "0.5rem 0.5rem",
-          colorScheme: "dark",
-        }}
+        className="form-input form-time-input"
       />
     </div>
   );
@@ -1082,210 +701,189 @@ export function EventFormModal({
   }
 
   return (
-    <>
-      {/* Keyframe-Animation für DatePicker-Panel */}
-      <style>{`
-        @keyframes dp-in {
-          from { opacity: 0; transform: translateY(-4px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        .dp-day-btn:hover:not(:disabled) {
-          background: rgba(255,255,255,0.07) !important;
-        }
-        input[type="time"]::-webkit-calendar-picker-indicator {
-          filter: invert(0.4);
-          cursor: pointer;
-        }
-      `}</style>
+    <div
+      className="modal-backdrop"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="form-modal">
+        {/* Header */}
+        <div className="form-modal-header">
+          <h2 className="form-modal-title">
+            {isEdit ? "Termin bearbeiten" : "Neuer Termin"}
+          </h2>
+          <button
+            className="form-modal-close"
+            onClick={onClose}
+            aria-label="Schließen"
+          >
+            ×
+          </button>
+        </div>
 
-      <div
-        style={S.overlay}
-        onClick={(e) => e.target === e.currentTarget && onClose()}
-      >
-        <div style={S.modal}>
-          {/* Accent bar */}
-          <div
-            style={{
-              height: "2px",
-              background: "linear-gradient(90deg, #5b8ef7, #7c5bf7)",
-              borderRadius: "2px",
-              margin: "-0.25rem 0 0",
-            }}
+        {/* Titel */}
+        <div className="form-field">
+          <label className="form-label" htmlFor="event-summary">
+            Titel *
+          </label>
+          <input
+            id="event-summary"
+            ref={summaryRef}
+            className="form-input"
+            value={summary}
+            onChange={(e) => setSummary(e.target.value)}
+            onKeyDown={(e) =>
+              e.key === "Enter" && canSave && !saving && handleSubmit()
+            }
+            placeholder="Terminbezeichnung"
           />
-          {/* Header */}
-          <div style={S.header}>
-            <h2 style={S.title}>
-              {isEdit ? "Termin bearbeiten" : "Neuer Termin"}
-            </h2>
-            <button style={S.closeBtn} onClick={onClose} aria-label="Schließen">
-              ×
-            </button>
+        </div>
+
+        {/* Kalender */}
+        {!isEdit && (
+          <div className="form-field">
+            <label className="form-label" htmlFor="event-calendar">
+              Kalender
+            </label>
+            <select
+              id="event-calendar"
+              className="form-select"
+              value={calendarId}
+              onChange={(e) => setCalendarId(e.target.value)}
+            >
+              {calendars.map((cal) => (
+                <option key={cal.id} value={cal.id}>
+                  {cal.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Datum/Zeit-Sektion */}
+        <div className="form-section">
+          <div className="form-section-head">
+            <span className="form-label">Datum &amp; Zeit</span>
+            <label className="form-toggle">
+              <input
+                type="checkbox"
+                className="form-toggle-checkbox"
+                checked={allDay}
+                onChange={handleAllDayToggle}
+              />
+              <span className="form-toggle-label">Ganztägig</span>
+            </label>
+          </div>
+          <div className="form-date-row">
+            <span className="form-date-row-label">Von</span>
+            <div style={{ flex: 1 }}>
+              <DateTimeField
+                value={startStr}
+                allDay={allDay}
+                onChange={handleStartChange}
+              />
+            </div>
+          </div>
+          <div className="form-date-row">
+            <span className="form-date-row-label">Bis</span>
+            <div style={{ flex: 1 }}>
+              <DateTimeField
+                value={endStr}
+                allDay={allDay}
+                min={startStr.slice(0, 10)}
+                onChange={setEndStr}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Wiederholung */}
+        <div className="form-section">
+          <label className="form-label">Wiederholung</label>
+          <div className="form-field">
+            <label className="form-sublabel" htmlFor="event-recur-freq">
+              Häufigkeit
+            </label>
+            <select
+              id="event-recur-freq"
+              className="form-select"
+              value={recurFreq}
+              onChange={(e) => {
+                setRecurFreq(e.target.value as RecurFreq);
+                if (e.target.value === "none") setRecurUntil("");
+                setRecurExtraParts("");
+              }}
+              disabled={editScope === "single"}
+            >
+              {(Object.keys(FREQ_LABELS) as RecurFreq[]).map((f) => (
+                <option key={f} value={f}>
+                  {FREQ_LABELS[f]}
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Titel */}
-          <div style={S.field}>
-            <label style={S.label}>Titel *</label>
-            <input
-              ref={summaryRef}
-              style={S.input}
-              value={summary}
-              onChange={(e) => setSummary(e.target.value)}
-              onKeyDown={(e) =>
-                e.key === "Enter" && canSave && !saving && handleSubmit()
-              }
-              placeholder="Terminbezeichnung"
-            />
-          </div>
-
-          {/* Kalender */}
-          {!isEdit && (
-            <div style={S.field}>
-              <label style={S.label}>Kalender</label>
-              <select
-                style={S.select}
-                value={calendarId}
-                onChange={(e) => setCalendarId(e.target.value)}
-              >
-                {calendars.map((cal) => (
-                  <option key={cal.id} value={cal.id}>
-                    {cal.name}
-                  </option>
-                ))}
-              </select>
+          {recurFreq !== "none" && (
+            <div className="form-field">
+              <label className="form-sublabel">Endet am (optional)</label>
+              <DatePicker
+                value={recurUntil}
+                min={startStr.slice(0, 10)}
+                onChange={setRecurUntil}
+                disabled={editScope === "single"}
+              />
             </div>
           )}
 
-          {/* Datum/Zeit-Sektion */}
-          <div style={S.dateSection}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "0.125rem",
-              }}
-            >
-              <span style={{ ...S.label, margin: 0 }}>Datum & Zeit</span>
-              <label style={S.toggleInline}>
-                <input
-                  type="checkbox"
-                  style={S.toggleCheckbox}
-                  checked={allDay}
-                  onChange={handleAllDayToggle}
-                />
-                <span style={S.toggleLabelSmall}>Ganztägig</span>
-              </label>
-            </div>
-            <div style={S.dateRow}>
-              <span style={S.dateLabel}>Von</span>
-              <div style={{ flex: 1 }}>
-                <DateTimeField
-                  value={startStr}
-                  allDay={allDay}
-                  onChange={handleStartChange}
-                />
-              </div>
-            </div>
-            <div style={S.dateRow}>
-              <span style={S.dateLabel}>Bis</span>
-              <div style={{ flex: 1 }}>
-                <DateTimeField
-                  value={endStr}
-                  allDay={allDay}
-                  min={startStr.slice(0, 10)}
-                  onChange={setEndStr}
-                />
-              </div>
-            </div>
-          </div>
+          {editScope === "single" && (
+            <p className="form-recur-note">
+              Wiederholungseinstellungen gelten für alle Termine der Serie —
+              hier nicht änderbar.
+            </p>
+          )}
+        </div>
 
-          {/* Wiederholung */}
-          <div style={S.field}>
-            <label style={S.label}>Wiederholung</label>
-            <div style={S.recurBox}>
-              <div style={S.recurRow}>
-                <div style={S.field}>
-                  <label style={S.sublabel}>Häufigkeit</label>
-                  <select
-                    style={S.select}
-                    value={recurFreq}
-                    onChange={(e) => {
-                      setRecurFreq(e.target.value as RecurFreq);
-                      if (e.target.value === "none") setRecurUntil("");
-                      setRecurExtraParts("");
-                    }}
-                    disabled={editScope === "single"}
-                  >
-                    {(Object.keys(FREQ_LABELS) as RecurFreq[]).map((f) => (
-                      <option key={f} value={f}>
-                        {FREQ_LABELS[f]}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+        {/* Ort */}
+        <div className="form-field">
+          <label className="form-label" htmlFor="event-location">
+            Ort
+          </label>
+          <input
+            id="event-location"
+            className="form-input"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="Optional"
+          />
+        </div>
 
-                {recurFreq !== "none" && (
-                  <div style={S.field}>
-                    <label style={S.sublabel}>Endet am (optional)</label>
-                    <DatePicker
-                      value={recurUntil}
-                      min={startStr.slice(0, 10)}
-                      onChange={setRecurUntil}
-                      disabled={editScope === "single"}
-                    />
-                  </div>
-                )}
-              </div>
+        {/* Beschreibung */}
+        <div className="form-field">
+          <label className="form-label" htmlFor="event-description">
+            Beschreibung
+          </label>
+          <textarea
+            id="event-description"
+            className="form-textarea"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Optional"
+          />
+        </div>
 
-              {editScope === "single" && (
-                <p style={{ margin: 0, fontSize: "0.75rem", color: "#666" }}>
-                  Wiederholungseinstellungen gelten für alle Termine der Serie —
-                  hier nicht änderbar.
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Ort */}
-          <div style={S.field}>
-            <label style={S.label}>Ort</label>
-            <input
-              style={S.input}
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="Optional"
-            />
-          </div>
-
-          {/* Beschreibung */}
-          <div style={S.field}>
-            <label style={S.label}>Beschreibung</label>
-            <textarea
-              style={S.textarea}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional"
-            />
-          </div>
-
-          {/* Footer */}
-          <div style={S.footer}>
-            <button style={S.btnCancel} onClick={onClose}>
-              Abbrechen
-            </button>
-            <button
-              style={{
-                ...S.btnSave,
-                ...(!canSave || saving ? S.btnSaveDisabled : {}),
-              }}
-              onClick={handleSubmit}
-              disabled={!canSave || saving}
-            >
-              {saving ? "Speichern…" : "Speichern"}
-            </button>
-          </div>
+        {/* Footer */}
+        <div className="form-modal-footer">
+          <button className="btn-secondary" onClick={onClose}>
+            Abbrechen
+          </button>
+          <button
+            className="btn-primary"
+            onClick={handleSubmit}
+            disabled={!canSave || saving}
+          >
+            {saving ? "Speichern…" : "Speichern"}
+          </button>
         </div>
       </div>
-    </>
+    </div>
   );
 }
