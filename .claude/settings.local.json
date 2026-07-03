@@ -36,7 +36,8 @@
       "Bash(npx eslint *)",
       "Bash(xargs ls)",
       "Bash(ps -p 377357 -o pid,ppid,cmd --no-headers)",
-      "Bash(ps -p 380643 -o pid,ppid,cmd --no-headers)"
+      "Bash(ps -p 380643 -o pid,ppid,cmd --no-headers)",
+      "Bash(grep *)"
     ]
   }
 }
