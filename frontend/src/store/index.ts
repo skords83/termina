@@ -1,11 +1,19 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+export interface AuthUser {
+  id: number;
+  email: string;
+  display_name: string;
+  role: string;
+  must_change_password: boolean;
+}
+
 interface AppState {
   // Auth
-  token: string | null;
-  setToken: (token: string) => void;
-  clearToken: () => void;
+  user: AuthUser | null;
+  setUser: (user: AuthUser) => void;
+  clearUser: () => void;
 
   // Active month (ISO date string, first of month)
   activeMonth: string;
@@ -24,9 +32,9 @@ function firstOfMonth(date: Date): string {
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
-      token: null,
-      setToken: (token) => set({ token }),
-      clearToken: () => set({ token: null }),
+      user: null,
+      setUser: (user) => set({ user }),
+      clearUser: () => set({ user: null }),
 
       activeMonth: firstOfMonth(new Date()),
       setActiveMonth: (month) => set({ activeMonth: month }),
@@ -43,7 +51,6 @@ export const useStore = create<AppState>()(
     {
       name: 'termina-storage',
       partialize: (state) => ({
-        token: state.token,
         hiddenCalendars: Array.from(state.hiddenCalendars),
       }),
       merge: (persisted: any, current) => ({

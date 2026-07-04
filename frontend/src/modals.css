@@ -468,6 +468,21 @@
 .login-input:focus { border-color: var(--accent); }
 .login-input::placeholder { color: var(--text-3); }
 
+.login-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.login-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
 .login-error {
   font-size: 12px;
   color: #f87171;
@@ -487,6 +502,17 @@
 }
 .login-btn:hover:not(:disabled) { opacity: 0.88; }
 .login-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.login-cancel-btn {
+  width: 100%;
+  background: transparent;
+  color: var(--text-3);
+  border-radius: var(--radius);
+  padding: 8px;
+  font-size: 13px;
+  transition: color 0.15s;
+}
+.login-cancel-btn:hover { color: var(--text); }
 
 /* ── Natural Input Bar: Custom Calendar Picker ──────────────────
    Ersetzt den nativen <select>. Das Menü rendert per position:fixed
@@ -940,3 +966,149 @@
 }
 .date-picker-footer-btn:hover { color: var(--text); }
 .date-picker-footer-btn--accent { color: var(--accent); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   ADMIN USERS PAGE
+   ═══════════════════════════════════════════════════════════════════ */
+
+.admin-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 60px 20px;
+  overflow-y: auto;
+}
+
+.admin-modal {
+  width: min(680px, 100%);
+  background: var(--modal-bg, #1e1e2e);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.admin-header h2 {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.admin-close-btn {
+  color: var(--text-3);
+  font-size: 16px;
+  padding: 4px 8px;
+}
+.admin-close-btn:hover { color: var(--text); }
+
+.admin-error { margin-top: 0; }
+
+.admin-temp-password {
+  background: var(--bg-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.admin-temp-password code {
+  font-family: var(--mono);
+  font-size: 14px;
+  background: var(--bg);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.admin-create-form {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.admin-create-form h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.admin-form-row {
+  display: flex;
+  gap: 10px;
+}
+.admin-form-row .login-input { width: auto; flex: 1; }
+
+.admin-calendar-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.admin-calendar-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.admin-submit-btn { width: auto; align-self: flex-start; padding: 9px 20px; }
+
+.admin-user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-user-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-user-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.admin-user-email { color: var(--text-3); }
+.admin-user-role {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+.admin-user-flag {
+  font-size: 11px;
+  color: #f87171;
+}
+
+.admin-reset-btn {
+  align-self: flex-start;
+  font-size: 12px;
+  color: var(--text-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.admin-reset-btn:hover { color: var(--text); border-color: var(--text-3); }

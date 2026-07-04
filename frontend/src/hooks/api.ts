@@ -6,7 +6,6 @@ export class ApiError extends Error {
 
 export async function apiFetch<T>(
   path: string,
-  token: string,
   params?: Record<string, string>
 ): Promise<T> {
   const url = new URL(path, window.location.origin);
@@ -15,7 +14,7 @@ export async function apiFetch<T>(
   }
 
   const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
+    credentials: 'include',
   });
 
   if (!res.ok) {

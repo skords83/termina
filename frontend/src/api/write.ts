@@ -10,20 +10,8 @@ import type {
   WriteError,
 } from '../types';
 
-const getToken = (): string => {
-  try {
-    const raw = localStorage.getItem('termina-storage');
-    if (!raw) return '';
-    const parsed = JSON.parse(raw);
-    return parsed?.state?.token ?? '';
-  } catch {
-    return '';
-  }
-};
-
 const headers = () => ({
   'Content-Type': 'application/json',
-  Authorization: `Bearer ${getToken()}`,
 });
 
 function mapError(status: number, body?: any): WriteError {
@@ -45,13 +33,14 @@ async function parseError(res: Response): Promise<WriteError> {
   return mapError(res.status, body);
 }
 
-// ── POST /api/events ──────────────────────────────────────────────────────────
+// ── POST /api/events ────────────────────────────────────────────
 
 export async function createEvent(
   payload: CreateEventPayload
 ): Promise<{ uid: string }> {
   const res = await fetch('/api/events', {
     method: 'POST',
+    credentials: 'include',
     headers: headers(),
     body: JSON.stringify(payload),
   });
@@ -59,7 +48,7 @@ export async function createEvent(
   return res.json();
 }
 
-// ── PUT /api/events/{uid} ─────────────────────────────────────────────────────
+// ── PUT /api/events/{uid} ────────────────────────────────────────
 
 export async function updateEvent(
   uid: string,
@@ -67,6 +56,7 @@ export async function updateEvent(
 ): Promise<{ uid: string }> {
   const res = await fetch(`/api/events/${encodeURIComponent(uid)}`, {
     method: 'PUT',
+    credentials: 'include',
     headers: headers(),
     body: JSON.stringify(payload),
   });
@@ -74,7 +64,7 @@ export async function updateEvent(
   return res.json();
 }
 
-// ── POST /api/events/{uid}/move ───────────────────────────────────────────────
+// ── POST /api/events/{uid}/move ──────────────────────────────────
 
 export async function moveEvent(
   uid: string,
@@ -82,6 +72,7 @@ export async function moveEvent(
 ): Promise<{ uid: string; new_uid?: string }> {
   const res = await fetch(`/api/events/${encodeURIComponent(uid)}/move`, {
     method: 'POST',
+    credentials: 'include',
     headers: headers(),
     body: JSON.stringify(payload),
   });
@@ -89,7 +80,7 @@ export async function moveEvent(
   return res.json();
 }
 
-// ── DELETE /api/events/{uid} ──────────────────────────────────────────────────
+// ── DELETE /api/events/{uid} ─────────────────────────────────────
 
 export async function deleteEvent(
   uid: string,
@@ -104,7 +95,7 @@ export async function deleteEvent(
     `/api/events/${encodeURIComponent(uid)}?${params.toString()}`,
     {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${getToken()}` },
+      credentials: 'include',
     }
   );
   if (!res.ok) throw await parseError(res);

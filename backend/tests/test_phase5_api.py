@@ -15,9 +15,12 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 
 from app.main import app
-from app.db.models import Base, Event, Calendar
+from app.auth.security import hash_password
+from app.db.models import Base, Event, Calendar, User
 from app.db.session import get_db
-from app.config import settings
+
+TEST_USER_EMAIL = "admin@test.local"
+TEST_USER_PASSWORD = "testpassword123"
 
 
 # ── In-Memory-DB für Tests ────────────────────────────────────────────────────
@@ -75,8 +78,23 @@ def client(monkeypatch):
 
 
 @pytest.fixture
-def auth():
-    return {"Authorization": f"Bearer {settings.api_token}"}
+def auth(client):
+    """Legt einen Admin-User an und loggt ihn ein (Session-Cookie landet im TestClient)."""
+    db = TestingSessionLocal()
+    db.add(User(
+        email=TEST_USER_EMAIL,
+        display_name="Test Admin",
+        password_hash=hash_password(TEST_USER_PASSWORD),
+        role="admin",
+        must_change_password=False,
+        created_at=datetime.utcnow(),
+    ))
+    db.commit()
+    db.close()
+
+    r = client.post("/api/auth/login", json={"email": TEST_USER_EMAIL, "password": TEST_USER_PASSWORD})
+    assert r.status_code == 200
+    return {}
 
 
 CAL_ID = "https://nc.example.com/remote.php/dav/calendars/user/personal/"
@@ -86,7 +104,7 @@ ISO_END   = "2026-06-20T15:00:00Z"
 
 # ── Auth-Tests ────────────────────────────────────────────────────────────────
 
-def test_post_event_ohne_token(client):
+def test_post_event_ohne_auth(client):
     r = client.post("/api/events", json={
         "calendar_id": CAL_ID, "summary": "Test",
         "start": ISO_START, "end": ISO_END,
@@ -94,7 +112,7 @@ def test_post_event_ohne_token(client):
     assert r.status_code == 401
 
 
-def test_put_event_ohne_token(client):
+def test_put_event_ohne_auth(client):
     r = client.put("/api/events/existing-uid-1234", json={
         "etag": '"etag-abc"', "summary": "X",
         "start": ISO_START, "end": ISO_END,
@@ -102,7 +120,7 @@ def test_put_event_ohne_token(client):
     assert r.status_code == 401
 
 
-def test_delete_event_ohne_token(client):
+def test_delete_event_ohne_auth(client):
     r = client.delete("/api/events/existing-uid-1234", params={"etag": '"etag-abc"'})
     assert r.status_code == 401
 

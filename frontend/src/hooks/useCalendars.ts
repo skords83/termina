@@ -8,21 +8,21 @@ interface Result {
   error: string | null;
 }
 
-export function useCalendars(token: string | null): Result {
+export function useCalendars(enabled: boolean): Result {
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) return;
+    if (!enabled) return;
     setLoading(true);
     setError(null);
 
-    apiFetch<Calendar[]>('/api/calendars', token)
+    apiFetch<Calendar[]>('/api/calendars')
       .then(setCalendars)
       .catch((err: ApiError) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [token]);
+  }, [enabled]);
 
   return { calendars, loading, error };
 }

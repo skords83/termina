@@ -37,7 +37,20 @@
       "Bash(xargs ls)",
       "Bash(ps -p 377357 -o pid,ppid,cmd --no-headers)",
       "Bash(ps -p 380643 -o pid,ppid,cmd --no-headers)",
-      "Bash(grep *)"
+      "Bash(grep *)",
+      "Bash(xargs cat)",
+      "Bash(xargs -I{} sh -c 'echo \"== {} ==\"; cat {}')",
+      "Bash(uv sync *)",
+      "Bash(uv pip *)",
+      "Bash(uv run *)",
+      "Bash(base64 -w0)",
+      "Read(//tmp/**)",
+      "Bash(base64 -w0 /home/skords/Dokumente/Projekte/termina/frontend/src/App.tsx)",
+      "Bash(cat -n .env.example)",
+      "Bash(cat -n backend/.env.example)",
+      "Bash(base64 -w0 /home/skords/Dokumente/Projekte/termina/docker-compose.yml)",
+      "Bash(base64 -w0 /home/skords/Dokumente/Projekte/termina/docker-compose.prod.yml)",
+      "Bash(rm -f verify.db)"
     ]
   }
 }

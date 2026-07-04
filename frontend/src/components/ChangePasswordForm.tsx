@@ -2,45 +2,51 @@ import { useState, FormEvent } from 'react';
 import { AuthUser } from '../store';
 
 interface Props {
+  user: AuthUser;
   onSuccess: (user: AuthUser) => void;
+  onLogout: () => void;
 }
 
-export function LoginForm({ onSuccess }: Props) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
+export function ChangePasswordForm({ user, onSuccess, onLogout }: Props) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!email.trim() || !password) return;
+    if (!newPassword) return;
+    if (newPassword !== confirmPassword) {
+      setError('Passwörter stimmen nicht überein.');
+      return;
+    }
 
     setLoading(true);
     setError(null);
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch('/api/auth/change-password', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password, remember_me: rememberMe }),
+        body: JSON.stringify({
+          current_password: user.must_change_password ? undefined : currentPassword,
+          new_password: newPassword,
+        }),
       });
 
       if (!res.ok) {
         if (res.status === 401) {
-          setError('E-Mail oder Passwort falsch.');
-        } else if (res.status === 429) {
-          const body = await res.json().catch(() => null);
-          setError(body?.detail ?? 'Zu viele Fehlversuche.');
+          setError('Aktuelles Passwort falsch.');
         } else {
           setError('Verbindung fehlgeschlagen.');
         }
         return;
       }
 
-      const user: AuthUser = await res.json();
-      onSuccess(user);
+      const updated: AuthUser = await res.json();
+      onSuccess(updated);
     } catch {
       setError('Verbindung fehlgeschlagen.');
     } finally {
@@ -61,36 +67,46 @@ export function LoginForm({ onSuccess }: Props) {
           </svg>
           <span>Termina</span>
         </div>
-        <p className="login-sub">Anmelden</p>
+        <p className="login-sub">
+          {user.must_change_password
+            ? 'Bitte lege ein neues Passwort fest.'
+            : 'Passwort ändern'}
+        </p>
         <form onSubmit={handleSubmit}>
+          {!user.must_change_password && (
+            <input
+              type="password"
+              className="login-input"
+              placeholder="Aktuelles Passwort"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoFocus
+              spellCheck={false}
+            />
+          )}
           <input
-            type="email"
+            type="password"
             className="login-input"
-            placeholder="E-Mail"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoFocus
+            placeholder="Neues Passwort"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            autoFocus={user.must_change_password}
             spellCheck={false}
           />
           <input
             type="password"
             className="login-input"
-            placeholder="Passwort"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Neues Passwort bestätigen"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
             spellCheck={false}
           />
-          <label className="login-remember">
-            <input
-              type="checkbox"
-              checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
-            />
-            Angemeldet bleiben
-          </label>
           {error && <p className="login-error">{error}</p>}
           <button className="login-btn" type="submit" disabled={loading}>
-            {loading ? 'Prüfe…' : 'Anmelden'}
+            {loading ? 'Speichere…' : 'Passwort ändern'}
+          </button>
+          <button className="login-cancel-btn" type="button" onClick={onLogout}>
+            Abmelden
           </button>
         </form>
       </div>

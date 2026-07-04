@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 os.environ.setdefault("CALDAV_URL", "http://localhost")
 os.environ.setdefault("CALDAV_USERNAME", "test")
 os.environ.setdefault("CALDAV_PASSWORD", "test")
-os.environ.setdefault("API_TOKEN", "secret")
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 from fastapi.testclient import TestClient
@@ -19,7 +18,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.db.models import Base, Calendar, Event
+from app.auth.security import hash_password
+from app.db.models import Base, Calendar, Event, User
 from app.db.session import get_db
 from app.main import app
 
@@ -46,7 +46,8 @@ def override_get_db():
 
 import app.db.session as _db_session
 
-AUTH = {"Authorization": "Bearer secret"}
+TEST_USER_EMAIL = "admin@test.local"
+TEST_USER_PASSWORD = "testpassword123"
 
 
 # --------------------------------------------------------------------------- #
@@ -91,27 +92,50 @@ def seed_db():
     db = TestingSession()
     db.query(Event).delete()
     db.query(Calendar).delete()
+    db.query(User).delete()
     db.commit()
     db.close()
+
+
+@pytest.fixture()
+def auth(client):
+    """Legt einen Admin-User an und loggt ihn ein (Session-Cookie landet im TestClient)."""
+    db = TestingSession()
+    db.add(User(
+        email=TEST_USER_EMAIL,
+        display_name="Test Admin",
+        password_hash=hash_password(TEST_USER_PASSWORD),
+        role="admin",
+        must_change_password=False,
+        created_at=datetime.utcnow(),
+    ))
+    db.commit()
+    db.close()
+
+    r = client.post("/api/auth/login", json={"email": TEST_USER_EMAIL, "password": TEST_USER_PASSWORD})
+    assert r.status_code == 200
+    return {}
+
 
 # --------------------------------------------------------------------------- #
 # Auth tests
 # --------------------------------------------------------------------------- #
 def test_calendars_no_auth(client):
     r = client.get("/api/calendars")
-    assert r.status_code == 401  # fehlender/ungültiger Token → Unauthorized
+    assert r.status_code == 401  # keine Session -> Unauthorized
 
 
-def test_calendars_wrong_token(client):
-    r = client.get("/api/calendars", headers={"Authorization": "Bearer wrong"})
+def test_calendars_invalid_session(client):
+    client.cookies.set("termina_session", "invalid-token")
+    r = client.get("/api/calendars")
     assert r.status_code == 401
 
 
 # --------------------------------------------------------------------------- #
 # /api/calendars
 # --------------------------------------------------------------------------- #
-def test_list_calendars(client):
-    r = client.get("/api/calendars", headers=AUTH)
+def test_list_calendars(client, auth):
+    r = client.get("/api/calendars", headers=auth)
     assert r.status_code == 200
     data = r.json()
     assert len(data) == 1
@@ -123,22 +147,22 @@ def test_list_calendars(client):
 # --------------------------------------------------------------------------- #
 # /api/events
 # --------------------------------------------------------------------------- #
-def test_list_events_full_month(client):
+def test_list_events_full_month(client, auth):
     r = client.get(
         "/api/events",
         params={"from": "2026-06-01T00:00:00Z", "to": "2026-06-30T23:59:59Z"},
-        headers=AUTH,
+        headers=auth,
     )
     assert r.status_code == 200
     uids = {e["uid"] for e in r.json()}
     assert uids == {"evt-1", "evt-2"}
 
 
-def test_list_events_narrow_range(client):
+def test_list_events_narrow_range(client, auth):
     r = client.get(
         "/api/events",
         params={"from": "2026-06-10T08:00:00Z", "to": "2026-06-10T10:00:00Z"},
-        headers=AUTH,
+        headers=auth,
     )
     assert r.status_code == 200
     uids = {e["uid"] for e in r.json()}
@@ -146,7 +170,7 @@ def test_list_events_narrow_range(client):
     assert "evt-2" not in uids
 
 
-def test_list_events_calendar_filter(client):
+def test_list_events_calendar_filter(client, auth):
     r = client.get(
         "/api/events",
         params={
@@ -154,17 +178,17 @@ def test_list_events_calendar_filter(client):
             "to": "2026-06-30T23:59:59Z",
             "calendar_id": "https://nc/cal/work",
         },
-        headers=AUTH,
+        headers=auth,
     )
     assert r.status_code == 200
     assert len(r.json()) == 2
 
 
-def test_list_events_no_results_outside_range(client):
+def test_list_events_no_results_outside_range(client, auth):
     r = client.get(
         "/api/events",
         params={"from": "2026-07-01T00:00:00Z", "to": "2026-07-31T23:59:59Z"},
-        headers=AUTH,
+        headers=auth,
     )
     assert r.status_code == 200
     assert r.json() == []

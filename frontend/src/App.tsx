@@ -14,6 +14,8 @@ import { useStore } from './store';
 import { useCalendars } from './hooks/useCalendars';
 import { useEvents } from './hooks/useEvents';
 import { LoginForm } from './components/LoginForm';
+import { ChangePasswordForm } from './components/ChangePasswordForm';
+import AdminUsersPage from './components/AdminUsersPage';
 import { Sidebar } from './components/Sidebar';
 import { MonthView } from './components/MonthView';
 import { EventPopup } from './components/EventPopup';
@@ -104,8 +106,26 @@ interface PendingMove {
 }
 
 export default function App() {
-  const { token, setToken, clearToken, activeMonth, setActiveMonth, hiddenCalendars, isCalendarVisible } =
+  const { user, setUser, clearUser, activeMonth, setActiveMonth, hiddenCalendars, isCalendarVisible } =
     useStore();
+
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then(setUser)
+      .catch(() => clearUser())
+      .finally(() => setAuthLoading(false));
+  }, []);
+
+  async function handleLogout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } finally {
+      clearUser();
+    }
+  }
 
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [anchorPos, setAnchorPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -113,6 +133,7 @@ export default function App() {
   const [createModal, setCreateModal] = useState<{ defaultDate: string } | null>(null);
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
   const [showSearch, setShowSearch] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [showNatural, setShowNatural] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
@@ -196,7 +217,7 @@ export default function App() {
     handleEventClick(ev, e);
   }
 
-  const { calendars } = useCalendars(token);
+  const { calendars } = useCalendars(!!user);
 
   const activeMonthDate = useMemo(() => new Date(activeMonth + 'T00:00:00'), [activeMonth]);
   useEffect(() => {
@@ -248,7 +269,7 @@ export default function App() {
     };
   }, [view, currentDate]);
 
-  const { events: serverEvents, loading: eventsLoading } = useEvents(token, from, to, refreshNonce);
+  const { events: serverEvents, loading: eventsLoading } = useEvents(!!user, from, to, refreshNonce);
   const events = useMergedEvents(serverEvents);
 
   const visibleCalendarIds = useMemo(
@@ -294,7 +315,7 @@ export default function App() {
     try {
       await fetch('/api/sync', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
       });
     } catch {
       // Fehler ignorieren — Refetch trotzdem
@@ -530,8 +551,16 @@ export default function App() {
     executeMove(event, mode, newStart, newEnd);
   }
 
-  if (!token) {
-    return <LoginForm onSuccess={setToken} />;
+  if (authLoading) {
+    return null;
+  }
+
+  if (!user) {
+    return <LoginForm onSuccess={setUser} />;
+  }
+
+  if (user.must_change_password) {
+    return <ChangePasswordForm user={user} onSuccess={setUser} onLogout={handleLogout} />;
   }
 
   return (
@@ -607,7 +636,17 @@ export default function App() {
               ))}
             </div>
             {eventsLoading && <span className="sync-indicator" title="Lädt…" />}
-            <button className="logout-btn" onClick={clearToken} title="Abmelden">⎋</button>
+            {user.role === 'admin' && (
+              <button className="logout-btn" onClick={() => setShowAdmin(true)} title="Nutzerverwaltung">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <circle cx="6" cy="5" r="2.5" />
+                  <path d="M1.5 14c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" />
+                  <circle cx="11.5" cy="5.5" r="2" />
+                  <path d="M10.5 10.2c1.9.3 3 1.5 3 3.8" />
+                </svg>
+              </button>
+            )}
+            <button className="logout-btn" onClick={handleLogout} title="Abmelden">⎋</button>
           </div>
         </header>
 
@@ -714,6 +753,10 @@ export default function App() {
               setRefreshNonce((n) => n + 1);
             }}
           />
+        )}
+
+        {showAdmin && (
+          <AdminUsersPage calendars={calendars} onClose={() => setShowAdmin(false)} />
         )}
 
         {showSearch && (

@@ -9,7 +9,7 @@ interface Result {
 }
 
 export function useEvents(
-  token: string | null,
+  enabled: boolean,
   from: string,
   to: string,
   nonce: number = 0
@@ -19,15 +19,15 @@ export function useEvents(
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) return;
+    if (!enabled) return;
     setLoading(true);
     setError(null);
 
-    apiFetch<CalendarEvent[]>('/api/events', token, { from, to })
+    apiFetch<CalendarEvent[]>('/api/events', { from, to })
       .then(setEvents)
       .catch((err: ApiError) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [token, from, to, nonce]);
+  }, [enabled, from, to, nonce]);
 
   return { events, loading, error };
 }

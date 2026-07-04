@@ -4,7 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import calendars, events, sync_api
+from app.api import admin_users, calendars, events, sync_api
+from app.auth import router as auth_router
+from app.auth.service import bootstrap_initial_admin
 from app.config import settings
 from app.db.session import apply_migrations, create_tables
 from app.scheduler import start_scheduler, stop_scheduler
@@ -22,6 +24,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 async def lifespan(app: FastAPI):
     create_tables()
     apply_migrations()
+    bootstrap_initial_admin()
     start_scheduler()
     yield
     stop_scheduler()
@@ -37,6 +40,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router.router, prefix="/api")
+app.include_router(admin_users.router, prefix="/api")
 app.include_router(calendars.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
 app.include_router(sync_api.router, prefix="/api")

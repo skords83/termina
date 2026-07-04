@@ -27,7 +27,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.auth import require_token
+from app.auth import service
+from app.auth.dependencies import get_current_user
 from app.caldav.write import (
     create_event,
     update_event,
@@ -38,7 +39,7 @@ from app.caldav.write import (
     CalDAVTimeoutError,
 )
 from app.caldav.sync import run_sync
-from app.db.models import Event, EventOverride
+from app.db.models import Event, EventOverride, User
 from app.db.session import get_db
 
 router = APIRouter()
@@ -216,11 +217,15 @@ def get_events(
     to: datetime = Query(),
     calendar_id: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
-    _: None = Depends(require_token),
+    user: User = Depends(get_current_user),
 ):
+    accessible = service.accessible_calendar_ids(db, user)
     q = db.query(Event)
     if calendar_id:
+        service.ensure_calendar_access(db, user, calendar_id)
         q = q.filter(Event.calendar_id == calendar_id)
+    elif accessible is not None:
+        q = q.filter(Event.calendar_id.in_(accessible))
 
     non_rrule = (
         q.filter(Event.rrule.is_(None), Event.start < to, Event.end > from_)
@@ -275,8 +280,9 @@ def post_event(
     body: EventCreate,
     background: BackgroundTasks,
     db: Session = Depends(get_db),
-    _: None = Depends(require_token),
+    user: User = Depends(get_current_user),
 ):
+    service.ensure_calendar_access(db, user, body.calendar_id)
     try:
         uid = create_event(
             calendar_id=body.calendar_id,
@@ -305,11 +311,12 @@ def put_event(
     body: EventUpdate,
     background: BackgroundTasks,
     db: Session = Depends(get_db),
-    _: None = Depends(require_token),
+    user: User = Depends(get_current_user),
 ):
     event = db.query(Event).filter(Event.uid == uid).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
+    service.ensure_calendar_access(db, user, event.calendar_id)
 
     start_dt = _to_dt(body.start)
     end_dt = _to_dt(body.end)
@@ -404,11 +411,12 @@ def post_move(
     body: EventMove,
     background: BackgroundTasks,
     db: Session = Depends(get_db),
-    _: None = Depends(require_token),
+    user: User = Depends(get_current_user),
 ):
     event = db.query(Event).filter(Event.uid == uid).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
+    service.ensure_calendar_access(db, user, event.calendar_id)
 
     if body.mode in ("single", "future") and body.recurrence_id is None:
         raise HTTPException(
@@ -533,11 +541,12 @@ def delete_event_endpoint(
     etag: str | None = Query(None),
     recurrence_id: str | None = Query(None),
     db: Session = Depends(get_db),
-    _: None = Depends(require_token),
+    user: User = Depends(get_current_user),
 ):
     event = db.query(Event).filter(Event.uid == uid).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
+    service.ensure_calendar_access(db, user, event.calendar_id)
 
     # Einzelne Instanz einer Serie löschen (EXDATE)
     if recurrence_id is not None:

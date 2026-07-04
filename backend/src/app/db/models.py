@@ -84,3 +84,51 @@ class EventOverride(Base):
     __table_args__ = (
         UniqueConstraint("master_uid", "recurrence_id", name="uq_event_override"),
     )
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False, default="member")  # admin|member|child
+    must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    calendar_access: Mapped[list["UserCalendarAccess"]] = relationship(
+        "UserCalendarAccess", back_populates="user", cascade="all, delete-orphan"
+    )
+    sessions: Mapped[list["UserSession"]] = relationship(
+        "UserSession", back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class UserSession(Base):
+    __tablename__ = "sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # sha256-Hash des Session-Tokens
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    remember_me: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    user: Mapped["User"] = relationship("User", back_populates="sessions")
+
+
+class UserCalendarAccess(Base):
+    __tablename__ = "user_calendar_access"
+
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    calendar_id: Mapped[str] = mapped_column(
+        String, ForeignKey("calendars.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    user: Mapped["User"] = relationship("User", back_populates="calendar_access")
