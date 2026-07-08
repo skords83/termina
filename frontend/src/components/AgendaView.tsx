@@ -130,7 +130,12 @@ export default function AgendaView({
                       style={{ background: color }}
                     />
                     <div className="agenda-event-body">
-                      <div className="agenda-event-title">{ev.summary}</div>
+                      <div className="agenda-event-title">
+                        <span className="agenda-event-title-text">{ev.summary}</span>
+                        {ev.is_recurring && (
+                          <span className="recur-icon" title="Wiederholt sich" aria-label="Wiederholt sich">⟲</span>
+                        )}
+                      </div>
                       {!ev.all_day && (
                         <div className="agenda-event-time">
                           {formatTime(ev.start)}

@@ -90,6 +90,8 @@
 }
 
 .week-allday-event {
+    display: flex;
+    align-items: center;
     font-size: 12px;
     padding: 1px 5px;
     border-radius: 4px;
@@ -97,13 +99,19 @@
     border-left: 2.5px solid var(--event-color);
     color: var(--text, #e8eaf0);
     cursor: pointer;
-    white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
     transition: background 0.1s;
 }
 .week-allday-event:hover {
     background: color-mix(in srgb, var(--event-color) 40%, transparent);
+}
+
+.week-allday-event-text {
+    min-width: 0;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Scrollable body */
@@ -189,13 +197,20 @@
 }
 
 .week-event-title {
+    display: flex;
+    align-items: center;
     font-size: 12px;
     font-weight: 500;
+    line-height: 1.35;
+    color: var(--text, #e8eaf0);
+}
+
+.week-event-title-text {
+    min-width: 0;
+    flex: 1;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    line-height: 1.35;
-    color: var(--text, #e8eaf0);
 }
 
 .week-event-time {
@@ -302,6 +317,8 @@
 }
 
 .day-allday-event {
+    display: flex;
+    align-items: center;
     font-size: 12px;
     padding: 2px 8px;
     border-radius: 4px;
@@ -309,13 +326,19 @@
     border-left: 2.5px solid var(--event-color);
     color: var(--text, #e8eaf0);
     cursor: pointer;
-    white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
     transition: background 0.1s;
 }
 .day-allday-event:hover {
     background: color-mix(in srgb, var(--event-color) 40%, transparent);
+}
+
+.day-allday-event-text {
+    min-width: 0;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .day-body {
@@ -405,13 +428,20 @@
 }
 
 .day-event-title {
+    display: flex;
+    align-items: center;
     font-size: 13px;
     font-weight: 500;
+    line-height: 1.35;
+    color: var(--text, #e8eaf0);
+}
+
+.day-event-title-text {
+    min-width: 0;
+    flex: 1;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    line-height: 1.35;
-    color: var(--text, #e8eaf0);
 }
 
 .day-event-time {
@@ -531,8 +561,15 @@
 }
 
 .agenda-event-title {
+    display: flex;
+    align-items: center;
     font-size: 14px;
     font-weight: 500;
+}
+
+.agenda-event-title-text {
+    min-width: 0;
+    flex: 1;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

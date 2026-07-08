@@ -112,7 +112,12 @@ function DraggableDayEvent({
         </div>
       ) : (
         <div className="day-event-inner">
-          <div className="day-event-title">{ev.summary}</div>
+          <div className="day-event-title">
+            <span className="day-event-title-text">{ev.summary}</span>
+            {ev.is_recurring && (
+              <span className="recur-icon" title="Wiederholt sich" aria-label="Wiederholt sich">⟲</span>
+            )}
+          </div>
           {showTime && (
             <div className="day-event-time">
               {startLabel}
@@ -253,7 +258,10 @@ export default function DayView({
                     onEventClick(ev, (e.currentTarget as HTMLElement).getBoundingClientRect())
                   }
                 >
-                  {ev.summary}
+                  <span className="day-allday-event-text">{ev.summary}</span>
+                  {ev.is_recurring && (
+                    <span className="recur-icon" title="Wiederholt sich" aria-label="Wiederholt sich">⟲</span>
+                  )}
                 </div>
               );
             })}

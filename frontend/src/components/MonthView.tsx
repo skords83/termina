@@ -106,6 +106,9 @@ function DraggableEvent({
       <span className="event-title">
         {isStart || !isMultiDay ? ev.summary : ''}
       </span>
+      {ev.is_recurring && (
+        <span className="recur-icon" title="Wiederholt sich" aria-label="Wiederholt sich">⟲</span>
+      )}
     </div>
   );
 }

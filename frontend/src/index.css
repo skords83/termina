@@ -55,3 +55,14 @@ button {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+/* ─── Recurrence indicator (shared across Month/Week/Day/Agenda chips) ── */
+.recur-icon {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 4px;
+  font-size: 0.85em;
+  line-height: 1;
+  color: var(--text-3);
+  opacity: 0.9;
+}

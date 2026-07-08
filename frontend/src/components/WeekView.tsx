@@ -120,7 +120,12 @@ function DraggableWeekEvent({
         </div>
       ) : (
         <div className="week-event-body">
-          <div className="week-event-title">{ev.summary}</div>
+          <div className="week-event-title">
+            <span className="week-event-title-text">{ev.summary}</span>
+            {ev.is_recurring && (
+              <span className="recur-icon" title="Wiederholt sich" aria-label="Wiederholt sich">⟲</span>
+            )}
+          </div>
           {showTime && (
             <div className="week-event-time">
               {startLabel}
@@ -297,7 +302,10 @@ export default function WeekView({
                       onEventClick(ev, (e.currentTarget as HTMLElement).getBoundingClientRect());
                     }}
                   >
-                    {ev.summary}
+                    <span className="week-allday-event-text">{ev.summary}</span>
+                    {ev.is_recurring && (
+                      <span className="recur-icon" title="Wiederholt sich" aria-label="Wiederholt sich">⟲</span>
+                    )}
                   </div>
                 );
               })}
