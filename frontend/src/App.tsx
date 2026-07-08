@@ -22,6 +22,7 @@ import { EventPopup } from './components/EventPopup';
 import { EventFormModal } from './components/EventFormModal';
 import { RecurringMoveDialog } from './components/RecurringMoveDialog';
 import { useOptimisticStore, useMergedEvents } from './store/eventsSlice';
+import { useHistoryStore } from './store/historySlice';
 import { useWindowFocusGuard } from './hooks/useWindowFocusGuard';
 import { CalendarEvent, MoveMode } from './types';
 import WeekView from './components/WeekView';
@@ -351,6 +352,21 @@ export default function App() {
       // Ab hier: nur wenn kein Modal offen
       if (anyModalOpen) return;
 
+      // ⌘Z / Strg+Z → Undo, ⌘⇧Z / Strg+⇧Z → Redo
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        const action = e.shiftKey ? useHistoryStore.getState().redo : useHistoryStore.getState().undo;
+        action().then((didApply) => {
+          if (didApply) {
+            setTimeout(() => setRefreshNonce((n) => n + 1), 1000);
+          }
+        }).catch((err) => {
+          console.error(err);
+          alert('Rückgängig/Wiederholen fehlgeschlagen.');
+        });
+        return;
+      }
+
       // Leertaste → NaturalInputBar
       if (e.key === ' ' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
@@ -518,6 +534,15 @@ export default function App() {
         new_end: newEndIso,
         recurrence_id: ev.recurrence_id ?? null,
       });
+
+      if (!ev.is_recurring) {
+        useHistoryStore.getState().record({
+          kind: 'move',
+          uid: ev.uid,
+          before: ev,
+          after: { ...ev, start: newStartIso, end: newEndIso },
+        });
+      }
 
       // Backend hat geschrieben + run_sync als BackgroundTask gestartet.
       // Kurz warten, damit der Sync die DB aktualisiert hat, dann refetchen.
@@ -723,6 +748,14 @@ export default function App() {
               if (recurrenceId) {
                 setRefreshNonce((n) => n + 1);
               } else {
+                if (selectedEvent && !selectedEvent.is_recurring) {
+                  useHistoryStore.getState().record({
+                    kind: 'delete',
+                    uid,
+                    before: selectedEvent,
+                    after: null,
+                  });
+                }
                 optimistic.deleteOptimistic(uid);
               }
             }}
@@ -736,6 +769,14 @@ export default function App() {
             defaultDate={createModal.defaultDate}
             onClose={() => setCreateModal(null)}
             onSaved={(_uid, ev) => {
+              if (!ev.is_recurring) {
+                useHistoryStore.getState().record({
+                  kind: 'create',
+                  uid: ev.uid,
+                  before: null,
+                  after: ev,
+                });
+              }
               optimistic.addOptimistic(ev);
               setRefreshNonce((n) => n + 1);
             }}
@@ -749,6 +790,14 @@ export default function App() {
             event={editModal}
             onClose={() => setEditModal(null)}
             onSaved={(_uid, ev) => {
+              if (!editModal.is_recurring) {
+                useHistoryStore.getState().record({
+                  kind: 'update',
+                  uid: ev.uid,
+                  before: editModal,
+                  after: ev,
+                });
+              }
               optimistic.updateOptimistic(ev);
               setRefreshNonce((n) => n + 1);
             }}
@@ -784,7 +833,7 @@ export default function App() {
                 all_day: parsed.all_day,
                 location: parsed.location,
               });
-              optimistic.addOptimistic({
+              const naturalEvent: CalendarEvent = {
                 uid,
                 calendar_id: parsed.calendar_id,
                 summary: parsed.summary,
@@ -794,7 +843,14 @@ export default function App() {
                 location: parsed.location ?? undefined,
                 etag: null,
                 description: null,
+              };
+              useHistoryStore.getState().record({
+                kind: 'create',
+                uid,
+                before: null,
+                after: naturalEvent,
               });
+              optimistic.addOptimistic(naturalEvent);
               setRefreshNonce((n) => n + 1);
             }}
             onClose={() => setShowNatural(false)}
