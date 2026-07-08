@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import type { CSSProperties } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { CalendarEvent, Calendar } from "../types/index";
 
@@ -97,9 +98,8 @@ function DraggableDayEvent({
         height,
         width,
         left,
-        borderLeftColor: color,
-        background: color + "1a",
-      }}
+        "--event-color": color,
+      } as CSSProperties}
       title={[ev.summary, ev.location].filter(Boolean).join(" · ")}
       onClick={(e) => {
         e.stopPropagation();
@@ -114,7 +114,7 @@ function DraggableDayEvent({
         <div className="day-event-inner">
           <div className="day-event-title">{ev.summary}</div>
           {showTime && (
-            <div className="day-event-time" style={{ color }}>
+            <div className="day-event-time">
               {startLabel}
               {showEndTime ? ` – ${endLabel}` : ""}
             </div>
@@ -248,7 +248,7 @@ export default function DayView({
                 <div
                   key={ev.uid}
                   className="day-allday-event"
-                  style={{ background: cal?.color || "#888" }}
+                  style={{ "--event-color": cal?.color || "#888" } as CSSProperties}
                   onClick={(e) =>
                     onEventClick(ev, (e.currentTarget as HTMLElement).getBoundingClientRect())
                   }

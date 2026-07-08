@@ -1,4 +1,5 @@
 import { useMemo, useRef } from "react";
+import type { CSSProperties } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { CalendarEvent, Calendar } from "../types/index";
 
@@ -104,9 +105,8 @@ function DraggableWeekEvent({
         height,
         width,
         left,
-        borderLeftColor: color,
-        background: color + "22",
-      }}
+        "--event-color": color,
+      } as CSSProperties}
       title={ev.summary}
       onClick={(e) => {
         e.stopPropagation();
@@ -115,14 +115,14 @@ function DraggableWeekEvent({
     >
       {height < 36 ? (
         <div className="week-event-compact">
-          <span className="week-event-compact-dot" style={{ background: color }} />
+          <span className="week-event-compact-dot" />
           <span className="week-event-compact-title">{ev.summary}</span>
         </div>
       ) : (
         <div className="week-event-body">
           <div className="week-event-title">{ev.summary}</div>
           {showTime && (
-            <div className="week-event-time" style={{ color }}>
+            <div className="week-event-time">
               {startLabel}
             </div>
           )}
@@ -291,7 +291,7 @@ export default function WeekView({
                   <div
                     key={ev.uid}
                     className="week-allday-event"
-                    style={{ background: cal?.color || "#888" }}
+                    style={{ "--event-color": cal?.color || "#888" } as CSSProperties}
                     onClick={(e) => {
                       e.stopPropagation();
                       onEventClick(ev, (e.currentTarget as HTMLElement).getBoundingClientRect());

@@ -79,7 +79,22 @@
       "Bash(kill 117789 117777)",
       "Bash(pkill -f \"vite\")",
       "Bash(pkill -f \"uv run uvicorn app.main:app --host 127.0.0.1 --port 8000\")",
-      "Bash(kill 117308 117312)"
+      "Bash(kill 117308 117312)",
+      "Skill(impeccable)",
+      "Bash(awk 'NR>=166 && NR<=255' /home/skords/Dokumente/Projekte/termina/frontend/src/calendar.css)",
+      "Bash(awk 'NR==1,NR==999' /home/skords/Dokumente/Projekte/termina/frontend/src/components/WeekView.tsx)",
+      "Bash(awk 'NR>=195 && NR<=230' /home/skords/Dokumente/Projekte/termina/frontend/src/calendar.css)",
+      "Bash(awk NR>=166 && NR<=260 *)",
+      "Bash(awk '{print NR\"\\\\t\"$0}' /home/skords/Dokumente/Projekte/termina/frontend/src/components/WeekView.tsx)",
+      "Bash(awk '{print NR\"\\\\t\"$0}' /home/skords/Dokumente/Projekte/termina/frontend/src/components/DayView.tsx)",
+      "Bash(awk NR>=225 && NR<=260 *)",
+      "Bash(awk NR>=163 && NR<=210 *)",
+      "Bash(awk NR>=225 && NR<=256 *)",
+      "Bash(awk NR>=122 && NR<=135 *)",
+      "Bash(awk 'NR>=1 && NR<=15' /home/skords/Dokumente/Projekte/termina/frontend/src/components/WeekView.tsx)",
+      "Bash(awk 'NR>=1 && NR<=15' /home/skords/Dokumente/Projekte/termina/frontend/src/components/DayView.tsx)",
+      "Bash(awk 'NR>=1 && NR<=15' /home/skords/Dokumente/Projekte/termina/frontend/src/components/MonthView.tsx)",
+      "Bash(awk NR>=115 && NR<=135 *)"
     ]
   }
 }
