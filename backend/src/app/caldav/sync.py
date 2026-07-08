@@ -9,6 +9,7 @@ from lxml import etree
 # OxiCloud sendet ungültige XML-Namespace-Präfixe (z.B. <http://apple.com/ns/ical/:calendar-color/>).
 # recover=True lässt lxml solche Tags überspringen statt abzubrechen.
 _XML_PARSER = etree.XMLParser(recover=True)
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.caldav.client import get_caldav_client
@@ -424,11 +425,12 @@ def _upsert_event(
         )
         db.flush()
 
-    db.query(EventOverride).filter(EventOverride.master_uid == master_uid).delete(
-        synchronize_session=False
-    )
-
-    covered_rids: set = set()
+    # Overrides zuerst pro recurrence_id deduplizieren (letzter VEVENT-Block gewinnt).
+    # Manche Server liefern für dieselbe RECURRENCE-ID mehrfach einen VEVENT-Block in
+    # derselben .ics-Ressource aus (kaputte/doppelte Serverdaten) — ohne Dedup würden
+    # daraus zwei INSERTs mit identischem Unique-Key (master_uid, recurrence_id) und
+    # damit ein IntegrityError, der den kompletten Sync-Batch des Kalenders killt.
+    overrides_by_rid: dict[Any, dict[str, Any]] = {}
 
     for ov_uid, rid_dt, ov_comp in override_components:
         if ov_uid != master_uid:
@@ -436,24 +438,21 @@ def _upsert_event(
         rid_norm, _ = _parse_dt(rid_dt)
         if rid_norm is None:
             continue
-        covered_rids.add(rid_norm)
         ov_start_raw = ov_comp.get("DTSTART")
         ov_start_val = ov_start_raw.dt if ov_start_raw else None
         ov_start_dt, _ = _parse_dt(ov_start_val)
         ov_end_raw = ov_comp.get("DTEND")
         ov_end_val = ov_end_raw.dt if ov_end_raw else None
         ov_end_dt, _ = _parse_dt(ov_end_val)
-        db.add(
-            EventOverride(
-                master_uid=master_uid,
-                recurrence_id=rid_norm,
-                start=ov_start_dt,
-                end=ov_end_dt,
-                summary=str(ov_comp.get("SUMMARY", "")) or None,
-                location=str(ov_comp.get("LOCATION", "")) or None,
-                description=str(ov_comp.get("DESCRIPTION", "")) or None,
-            )
-        )
+        overrides_by_rid[rid_norm] = {
+            "master_uid": master_uid,
+            "recurrence_id": rid_norm,
+            "start": ov_start_dt,
+            "end": ov_end_dt,
+            "summary": str(ov_comp.get("SUMMARY", "")) or None,
+            "location": str(ov_comp.get("LOCATION", "")) or None,
+            "description": str(ov_comp.get("DESCRIPTION", "")) or None,
+        }
 
     # EXDATE → EventOverride mit start=None (= gelöschte Instanz)
     exdates_prop = master_component.get("EXDATE")
@@ -464,13 +463,39 @@ def _upsert_event(
             dts = ex.dts if hasattr(ex, "dts") else [ex]
             for dt_obj in dts:
                 rid_norm, _ = _parse_dt(dt_obj.dt)
-                if rid_norm is not None and rid_norm not in covered_rids:
-                    db.add(EventOverride(
-                        master_uid=master_uid,
-                        recurrence_id=rid_norm,
-                        start=None,
-                        end=None,
-                    ))
+                if rid_norm is not None and rid_norm not in overrides_by_rid:
+                    overrides_by_rid[rid_norm] = {
+                        "master_uid": master_uid,
+                        "recurrence_id": rid_norm,
+                        "start": None,
+                        "end": None,
+                        "summary": None,
+                        "location": None,
+                        "description": None,
+                    }
+
+    # Overrides entfernen, die serverseitig nicht mehr existieren (z.B. Instanz wieder
+    # an die Serie angeglichen). Alles andere wird per Upsert geschrieben statt per
+    # blindem INSERT — schützt zusätzlich gegen einen bereits vorhandenen Datensatz
+    # (z.B. aus einem parallel laufenden Sync-Lauf).
+    stale_filter = [EventOverride.master_uid == master_uid]
+    if overrides_by_rid:
+        stale_filter.append(EventOverride.recurrence_id.notin_(list(overrides_by_rid.keys())))
+    db.query(EventOverride).filter(*stale_filter).delete(synchronize_session=False)
+
+    if overrides_by_rid:
+        upsert_stmt = sqlite_insert(EventOverride).values(list(overrides_by_rid.values()))
+        upsert_stmt = upsert_stmt.on_conflict_do_update(
+            index_elements=["master_uid", "recurrence_id"],
+            set_={
+                "start": upsert_stmt.excluded.start,
+                "end": upsert_stmt.excluded.end,
+                "summary": upsert_stmt.excluded.summary,
+                "location": upsert_stmt.excluded.location,
+                "description": upsert_stmt.excluded.description,
+            },
+        )
+        db.execute(upsert_stmt)
 
 
 def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
@@ -846,9 +871,17 @@ def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
             return
 
         for obj_url, (remote_etag, raw) in fetched.items():
-            _upsert_event(
-                db, cal_url, remote_etag, raw, obj_url, local_events, seen_uids
-            )
+            # Jedes Event in einem eigenen SAVEPOINT: schlägt der Upsert für ein
+            # einzelnes (kaputtes) Event fehl, geht nur dessen Änderung verloren —
+            # nicht der gesamte bisher in diesem Kalender-Batch gesammelte Fortschritt
+            # (z.B. ein Termin, der gerade erst neu angelegt wurde).
+            try:
+                with db.begin_nested():
+                    _upsert_event(
+                        db, cal_url, remote_etag, raw, obj_url, local_events, seen_uids
+                    )
+            except Exception as exc:
+                logger.error("Upsert failed for %s in %s: %s", obj_url, cal_url, exc)
 
     # Unveränderte Events als "gesehen" markieren (nicht löschen!)
     for etag in unchanged_etags:

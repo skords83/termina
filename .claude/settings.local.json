@@ -135,7 +135,14 @@
       "Bash(sed -i 's|href=\"/home/skords/Dokumente/Projekte/termina/frontend/src/index.css\"|href=\"./index.css\"|' /tmp/claude-1000/-home-skords-Dokumente-Projekte-termina/01dbfc63-1166-4c2a-8b8f-db590c9f04f4/scratchpad/recur_icon_preview.html)",
       "Bash(cp /tmp/claude-1000/-home-skords-Dokumente-Projekte-termina/01dbfc63-1166-4c2a-8b8f-db590c9f04f4/scratchpad/recur_icon_preview.html /home/skords/Dokumente/Projekte/termina/frontend/src/_recur_preview.html)",
       "Bash(curl -sI http://localhost:8933/_recur_preview.html)",
-      "Bash(pkill -f \"http.server 8933\")"
+      "Bash(pkill -f \"http.server 8933\")",
+      "Bash(.venv/bin/python -m pytest tests/ -q)",
+      "Bash(.venv/bin/python -m pytest tests/ -q --ignore=tests/test_phase1_sync.py)",
+      "Bash(mkdir -p /tmp/claude-1000/-home-skords-Dokumente-Projekte-termina/e593c347-9181-43cc-85d6-52a6f04021cc/scratchpad)",
+      "Bash(.venv/bin/python /tmp/claude-1000/-home-skords-Dokumente-Projekte-termina/e593c347-9181-43cc-85d6-52a6f04021cc/scratchpad/repro_override_bug.py)",
+      "Bash(.venv/bin/python /tmp/claude-1000/-home-skords-Dokumente-Projekte-termina/e593c347-9181-43cc-85d6-52a6f04021cc/scratchpad/test_savepoint_isolation.py)",
+      "Bash(.venv/bin/python -c \"import ast; ast.parse\\(open\\('src/app/caldav/sync.py'\\).read\\(\\)\\)\")",
+      "Bash(rm -f /tmp/claude-1000/-home-skords-Dokumente-Projekte-termina/e593c347-9181-43cc-85d6-52a6f04021cc/scratchpad/repro*.db)"
     ]
   }
 }
