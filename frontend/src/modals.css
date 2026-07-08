@@ -637,6 +637,22 @@
 .btn-primary:disabled,
 .btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
 
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.btn-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: tb-spin 0.7s linear infinite;
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    EVENT FORM MODAL
    ═══════════════════════════════════════════════════════════════════ */

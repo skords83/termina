@@ -880,7 +880,8 @@ export function EventFormModal({
             onClick={handleSubmit}
             disabled={!canSave || saving}
           >
-            {saving ? "Speichern…" : "Speichern"}
+            {saving && <span className="btn-spinner" aria-hidden="true" />}
+            {saving ? "Speichert…" : "Speichern"}
           </button>
         </div>
       </div>
