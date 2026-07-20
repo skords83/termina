@@ -49,6 +49,59 @@ export async function downloadIcsExport(calendarId?: string | null): Promise<voi
   URL.revokeObjectURL(objectUrl);
 }
 
+// ── GET /api/ics/export/event/{uid} ──────────────────────────────
+
+export async function downloadIcsEventExport(uid: string): Promise<void> {
+  const res = await fetch(`/api/ics/export/event/${encodeURIComponent(uid)}`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw await parseError(res);
+
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objectUrl;
+  a.download = filenameFromContentDisposition(res.headers.get('Content-Disposition'));
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+// ── POST /api/ics/import/preview ─────────────────────────────────
+
+export interface ImportIcsPreviewEvent {
+  summary: string;
+  start: string | null;
+  end: string | null;
+  all_day: boolean;
+  is_recurring: boolean;
+  override_count: number;
+  conflict: boolean;
+}
+
+export interface ImportIcsPreviewResult {
+  events: ImportIcsPreviewEvent[];
+  total: number;
+}
+
+export async function previewIcsImport(
+  file: File,
+  calendarId: string
+): Promise<ImportIcsPreviewResult> {
+  const formData = new FormData();
+  formData.append('calendar_id', calendarId);
+  formData.append('file', file);
+
+  const res = await fetch('/api/ics/import/preview', {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}
+
 // ── POST /api/ics/import ─────────────────────────────────────────
 
 export interface ImportIcsResult {

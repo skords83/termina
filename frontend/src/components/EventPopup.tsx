@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { deleteEvent } from "../api/write";
+import { downloadIcsEventExport } from "../api/ics";
 import { useToast } from "./Toast";
 import type { CalendarEvent, WriteError } from "../types";
 
@@ -348,6 +349,14 @@ export function EventPopup({
     }
   }, [event, onDeleted, onClose, showToast]);
 
+  const handleExport = useCallback(async () => {
+    try {
+      await downloadIcsEventExport(event.uid);
+    } catch {
+      showToast("Export fehlgeschlagen.", "error");
+    }
+  }, [event.uid, showToast]);
+
   const handleDeleteClick = useCallback(() => {
     if (event.is_recurring) {
       setRecurringDeleteDialog(true);
@@ -420,6 +429,14 @@ export function EventPopup({
             </>
           ) : (
             <>
+              <button
+                style={S.btnEdit}
+                onClick={handleExport}
+                title="Als .ics exportieren"
+                aria-label="Als .ics exportieren"
+              >
+                ⭳
+              </button>
               <button
                 style={S.btnEdit}
                 onClick={() => {

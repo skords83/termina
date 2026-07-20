@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import uuid
 import zoneinfo
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from icalendar import Calendar, Event as ICalEvent
@@ -129,16 +129,8 @@ class IcsImportError(Exception):
     pass
 
 
-def split_ics_for_import(data: bytes) -> list[tuple[str, bytes]]:
-    """Parst eine hochgeladene .ics-Datei und gruppiert VEVENTs nach UID.
-
-    Jede Gruppe (Master + ggf. Override-VEVENTs mit RECURRENCE-ID) wird als
-    eigenständiges .ics-Objekt mit einer *neuen* UID zurückgegeben — verhindert
-    Kollisionen mit bereits vorhandenen Events (z.B. beim Reimport einer
-    zuvor selbst exportierten Datei).
-
-    Returns: Liste von (neue_uid, ical_bytes).
-    """
+def _group_vevents_by_uid(data: bytes) -> tuple[dict[str, list[Any]], list[str]]:
+    """Parst eine .ics-Datei und gruppiert VEVENTs nach UID (Reihenfolge des ersten Auftretens)."""
     try:
         parsed = Calendar.from_ical(data)
     except Exception as e:
@@ -158,6 +150,21 @@ def split_ics_for_import(data: bytes) -> list[tuple[str, bytes]]:
     if not order:
         raise IcsImportError("Keine Termine (VEVENT) in der Datei gefunden")
 
+    return groups, order
+
+
+def split_ics_for_import(data: bytes) -> list[tuple[str, bytes]]:
+    """Gruppiert VEVENTs einer hochgeladenen .ics-Datei nach UID.
+
+    Jede Gruppe (Master + ggf. Override-VEVENTs mit RECURRENCE-ID) wird als
+    eigenständiges .ics-Objekt mit einer *neuen* UID zurückgegeben — verhindert
+    Kollisionen mit bereits vorhandenen Events (z.B. beim Reimport einer
+    zuvor selbst exportierten Datei).
+
+    Returns: Liste von (neue_uid, ical_bytes).
+    """
+    groups, order = _group_vevents_by_uid(data)
+
     results: list[tuple[str, bytes]] = []
     for old_uid in order:
         new_uid = str(uuid.uuid4())
@@ -171,3 +178,63 @@ def split_ics_for_import(data: bytes) -> list[tuple[str, bytes]]:
         results.append((new_uid, new_cal.to_ical()))
 
     return results
+
+
+def parse_ics_preview(data: bytes) -> list[dict[str, Any]]:
+    """Gruppiert VEVENTs einer .ics-Datei nach UID und liefert die Eckdaten des
+    Master-Termins je Gruppe, ohne irgendetwas zu schreiben — für die
+    Import-Vorschau. `start`/`end` bleiben rohe date/datetime-Objekte (noch
+    nicht serialisiert), damit der Aufrufer sie für die Konfliktprüfung
+    normalisieren kann.
+    """
+    groups, order = _group_vevents_by_uid(data)
+
+    previews: list[dict[str, Any]] = []
+    for uid in order:
+        comps = groups[uid]
+        master = next((c for c in comps if c.get("RECURRENCE-ID") is None), comps[0])
+
+        dtstart = master.get("DTSTART")
+        start_val = dtstart.dt if dtstart else None
+        all_day = start_val is not None and not isinstance(start_val, datetime) and isinstance(start_val, date)
+
+        dtend = master.get("DTEND")
+        end_val = dtend.dt if dtend else None
+
+        previews.append({
+            "summary": str(master.get("SUMMARY", "")).strip() or "(ohne Titel)",
+            "start": start_val,
+            "end": end_val,
+            "all_day": all_day,
+            "is_recurring": master.get("RRULE") is not None,
+            "override_count": len(comps) - 1,
+        })
+
+    return previews
+
+
+def annotate_import_conflicts(previews: list[dict[str, Any]], existing: list[Event]) -> None:
+    """Setzt `conflict: bool` je Vorschau-Eintrag, falls sich der Termin zeitlich
+    mit einem bestehenden Termin im Zielkalender überschneidet. Wiederkehrende
+    Termine werden nicht geprüft (Serien-Expansion wäre für eine reine Vorschau
+    unverhältnismäßig teuer)."""
+    normalized_existing: list[tuple[datetime, datetime]] = []
+    for e in existing:
+        if e.start is None:
+            continue
+        e_start = _to_midnight_utc(e.start) if e.all_day else _to_utc(e.start)
+        e_end_raw = e.end or e.start
+        e_end = _to_midnight_utc(e_end_raw) if e.all_day else _to_utc(e_end_raw)
+        normalized_existing.append((e_start, e_end))
+
+    for p in previews:
+        p["conflict"] = False
+        if p["is_recurring"] or p["start"] is None:
+            continue
+        start = _to_midnight_utc(p["start"]) if p["all_day"] else _to_utc(p["start"])
+        end_raw = p["end"] or p["start"]
+        end = _to_midnight_utc(end_raw) if p["all_day"] else _to_utc(end_raw)
+        for e_start, e_end in normalized_existing:
+            if start < e_end and e_start < end:
+                p["conflict"] = True
+                break

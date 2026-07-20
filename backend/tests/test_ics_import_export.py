@@ -215,6 +215,43 @@ def test_export_filters_by_calendar_id_no_access(client, member_auth):
 
 
 # --------------------------------------------------------------------------- #
+# Single-event export
+# --------------------------------------------------------------------------- #
+def test_export_event_requires_auth(client):
+    r = client.get("/api/ics/export/event/evt-1")
+    assert r.status_code == 401
+
+
+def test_export_event_returns_single_event(client, auth):
+    r = client.get("/api/ics/export/event/evt-1", headers=auth)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/calendar")
+
+    cal = ICalendar.from_ical(r.content)
+    vevents = list(cal.walk("VEVENT"))
+    assert len(vevents) == 1
+    assert str(vevents[0].get("SUMMARY")) == "Team Standup"
+
+
+def test_export_event_includes_overrides(client, auth):
+    r = client.get("/api/ics/export/event/evt-series", headers=auth)
+    cal = ICalendar.from_ical(r.content)
+    uids = {str(v.get("UID")) for v in cal.walk("VEVENT")}
+    assert uids == {"evt-series"}
+    assert len(cal.walk("VEVENT")) == 2  # Master + eine Override-Instanz
+
+
+def test_export_event_not_found(client, auth):
+    r = client.get("/api/ics/export/event/does-not-exist", headers=auth)
+    assert r.status_code == 404
+
+
+def test_export_event_no_calendar_access_returns_403(client, member_auth):
+    r = client.get("/api/ics/export/event/evt-1", headers=member_auth)
+    assert r.status_code == 403
+
+
+# --------------------------------------------------------------------------- #
 # Import
 # --------------------------------------------------------------------------- #
 SAMPLE_ICS = b"""BEGIN:VCALENDAR
@@ -300,3 +337,89 @@ def test_import_caldav_down_returns_503(client, auth, monkeypatch):
         headers=auth,
     )
     assert r.status_code == 503
+
+
+# --------------------------------------------------------------------------- #
+# Import-Vorschau
+# --------------------------------------------------------------------------- #
+def test_import_preview_requires_auth(client):
+    r = client.post(
+        "/api/ics/import/preview",
+        data={"calendar_id": CAL_ID},
+        files={"file": ("test.ics", SAMPLE_ICS, "text/calendar")},
+    )
+    assert r.status_code == 401
+
+
+def test_import_preview_does_not_write(client, auth, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.api.ics_api.import_ical_object",
+        lambda calendar_id, ical_bytes: calls.append((calendar_id, ical_bytes)),
+    )
+
+    r = client.post(
+        "/api/ics/import/preview",
+        data={"calendar_id": CAL_ID},
+        files={"file": ("test.ics", SAMPLE_ICS, "text/calendar")},
+        headers=auth,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 1
+    assert body["events"][0]["summary"] == "Imported Event"
+    assert body["events"][0]["is_recurring"] is False
+    assert calls == []  # Reine Vorschau schreibt nichts
+
+
+def test_import_preview_flags_time_conflict(client, auth):
+    conflicting_ics = b"""BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Test//EN
+BEGIN:VEVENT
+UID:conflicting-uid
+SUMMARY:Overlapping Standup
+DTSTART:20260610T071500Z
+DTEND:20260610T072000Z
+END:VEVENT
+END:VCALENDAR
+"""
+    r = client.post(
+        "/api/ics/import/preview",
+        data={"calendar_id": CAL_ID},
+        files={"file": ("test.ics", conflicting_ics, "text/calendar")},
+        headers=auth,
+    )
+    assert r.status_code == 200
+    assert r.json()["events"][0]["conflict"] is True
+
+
+def test_import_preview_no_conflict_for_distinct_time(client, auth):
+    r = client.post(
+        "/api/ics/import/preview",
+        data={"calendar_id": CAL_ID},
+        files={"file": ("test.ics", SAMPLE_ICS, "text/calendar")},
+        headers=auth,
+    )
+    assert r.status_code == 200
+    assert r.json()["events"][0]["conflict"] is False
+
+
+def test_import_preview_invalid_file_returns_400(client, auth):
+    r = client.post(
+        "/api/ics/import/preview",
+        data={"calendar_id": CAL_ID},
+        files={"file": ("test.ics", b"not an ics file", "text/calendar")},
+        headers=auth,
+    )
+    assert r.status_code == 400
+
+
+def test_import_preview_no_calendar_access_returns_403(client, member_auth):
+    r = client.post(
+        "/api/ics/import/preview",
+        data={"calendar_id": CAL_ID},
+        files={"file": ("test.ics", SAMPLE_ICS, "text/calendar")},
+        headers=member_auth,
+    )
+    assert r.status_code == 403
