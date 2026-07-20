@@ -623,18 +623,16 @@ def _apply_move_single(
     ical.add_component(override)
 
 
-def _apply_move_future(
-    caldav_cal,
+def _split_master_until(
     ical: Calendar,
     master: ICalEvent,
     recurrence_id: datetime,
-    new_start: datetime,
-    new_end: datetime,
     all_day: bool,
-) -> str:
+) -> vRecur:
     """
-    Setzt UNTIL im Master-RRULE (= alte Serie endet vor recurrence_id),
-    erstellt neues Event mit eigener UID ab new_start mit gleicher RRULE.
+    Setzt UNTIL im Master-RRULE (= Serie endet vor recurrence_id) und entfernt
+    Override-VEVENTs ab recurrence_id (inkl.). Gibt die *ursprüngliche*
+    (unveränderte) RRULE zurück, aus der eine Folge-Serie ihre RRULE ableiten kann.
     """
     rrule = master.get("RRULE")
     if rrule is None:
@@ -642,7 +640,7 @@ def _apply_move_future(
 
     master_aware = _master_dtstart_is_aware(master)
     logger.info(
-        "move_event[future] master DTSTART tz-aware=%s, recurrence_id=%s, all_day=%s",
+        "split_master_until: master DTSTART tz-aware=%s, recurrence_id=%s, all_day=%s",
         master_aware, recurrence_id, all_day,
     )
 
@@ -661,7 +659,7 @@ def _apply_move_future(
         else:
             until_val = until_naive_local
 
-    logger.info("move_event[future] setting UNTIL=%s (master_aware=%s)", until_val, master_aware)
+    logger.info("split_master_until: setting UNTIL=%s (master_aware=%s)", until_val, master_aware)
 
     new_rrule_dict = _strip_rrule_keys(rrule, {"UNTIL", "COUNT"})
     new_rrule_dict["UNTIL"] = [until_val]
@@ -669,6 +667,9 @@ def _apply_move_future(
     master.pop("RRULE", None)
     master.add("RRULE", new_rrule_dict)
 
+    rid_dt_norm = recurrence_id if isinstance(recurrence_id, datetime) else datetime(
+        recurrence_id.year, recurrence_id.month, recurrence_id.day
+    )
     to_remove = []
     for sub in ical.subcomponents:
         if getattr(sub, "name", None) != "VEVENT":
@@ -678,13 +679,28 @@ def _apply_move_future(
             continue
         old = rid.dt
         old_dt = old if isinstance(old, datetime) else datetime(old.year, old.month, old.day)
-        rid_dt_norm = recurrence_id if isinstance(recurrence_id, datetime) else datetime(
-            recurrence_id.year, recurrence_id.month, recurrence_id.day
-        )
         if old_dt.replace(tzinfo=None) >= rid_dt_norm.replace(tzinfo=None):
             to_remove.append(sub)
     for sub in to_remove:
         ical.subcomponents.remove(sub)
+
+    return rrule
+
+
+def _apply_move_future(
+    caldav_cal,
+    ical: Calendar,
+    master: ICalEvent,
+    recurrence_id: datetime,
+    new_start: datetime,
+    new_end: datetime,
+    all_day: bool,
+) -> str:
+    """
+    Setzt UNTIL im Master-RRULE (= alte Serie endet vor recurrence_id),
+    erstellt neues Event mit eigener UID ab new_start mit gleicher RRULE.
+    """
+    rrule = _split_master_until(ical, master, recurrence_id, all_day)
 
     new_uid = str(uuid.uuid4())
     new_cal = Calendar()
@@ -717,3 +733,123 @@ def _apply_move_future(
 
     logger.info("move_event[future] created new event uid=%s", new_uid)
     return new_uid
+
+
+def update_event_future(
+    calendar_id: str,
+    uid: str,
+    etag: str | None,
+    summary: str,
+    start: datetime,
+    end: datetime,
+    all_day: bool,
+    location: str | None,
+    description: str | None,
+    recurrence_id: datetime,
+) -> str:
+    """
+    Trennt die Serie an recurrence_id (UNTIL im alten Master) und legt ein neues
+    Event mit den geänderten Feldern (gleiche RRULE-Wiederholung) ab dort an.
+    Gibt die neue UID zurück.
+    """
+    try:
+        client = _get_client()
+        cal = _find_caldav_calendar(client, calendar_id)
+        if cal is None:
+            raise ValueError(f"Kalender nicht gefunden: {calendar_id}")
+
+        obj = _find_caldav_event(cal, uid)
+        if obj is None:
+            raise ValueError(f"Event nicht gefunden: {uid}")
+
+        current_etag = _get_etag(obj)
+        if current_etag and etag and current_etag != etag:
+            raise ConflictError(f"ETag-Konflikt für Event {uid}")
+
+        ical = Calendar.from_ical(obj.data)
+        master = _find_master(ical)
+        if master is None:
+            raise ValueError("Kein Master-VEVENT gefunden")
+
+        rrule = _split_master_until(ical, master, recurrence_id, all_day)
+        obj.data = ical.to_ical()
+        _caldav_op_with_retry(obj.save, context=f"update_event_future(split, {uid})")
+
+        new_uid = str(uuid.uuid4())
+        new_cal = Calendar()
+        new_cal.add("prodid", "-//Termina//termina//EN")
+        new_cal.add("version", "2.0")
+
+        new_ev = ICalEvent()
+        new_ev.add("uid", new_uid)
+        new_ev.add("dtstamp", datetime.now(timezone.utc))
+        new_ev.add("summary", summary)
+        if location:
+            new_ev.add("location", location)
+        if description:
+            new_ev.add("description", description)
+
+        if all_day:
+            s_dt, e_dt = _normalize_all_day_utc(start, end)
+            new_ev.add("dtstart", s_dt)
+            new_ev.add("dtend", e_dt)
+        else:
+            new_ev.add("dtstart", _to_utc(start))
+            new_ev.add("dtend", _to_utc(end))
+
+        fresh_rrule = _strip_rrule_keys(rrule, {"UNTIL", "COUNT"})
+        new_ev.add("rrule", fresh_rrule)
+
+        new_cal.add_component(new_ev)
+        _caldav_op_with_retry(
+            lambda: cal.save_event(new_cal.to_ical()),
+            context=f"update_event_future(create, {new_uid})",
+        )
+
+        logger.info("update_event_future: created new event uid=%s", new_uid)
+        return new_uid
+
+    except (ValueError, ConflictError):
+        raise
+    except CalDAVTimeoutError:
+        raise
+    except Exception as e:
+        raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
+
+
+def delete_future_occurrences(
+    calendar_id: str,
+    uid: str,
+    etag: str | None,
+    recurrence_id: datetime,
+    all_day: bool = False,
+) -> None:
+    """Löscht diese und alle folgenden Instanzen einer Serie (UNTIL-Split, kein Folge-Event)."""
+    try:
+        client = _get_client()
+        cal = _find_caldav_calendar(client, calendar_id)
+        if cal is None:
+            raise ValueError(f"Kalender nicht gefunden: {calendar_id}")
+
+        obj = _find_caldav_event(cal, uid)
+        if obj is None:
+            raise ValueError(f"Event nicht gefunden: {uid}")
+
+        current_etag = _get_etag(obj)
+        if current_etag and etag and current_etag != etag:
+            raise ConflictError(f"ETag-Konflikt für Event {uid}")
+
+        ical = Calendar.from_ical(obj.data)
+        master = _find_master(ical)
+        if master is None:
+            raise ValueError("Kein Master-VEVENT gefunden")
+
+        _split_master_until(ical, master, recurrence_id, all_day)
+        obj.data = ical.to_ical()
+        _caldav_op_with_retry(obj.save, context=f"delete_future_occurrences({uid})")
+    except (ValueError, ConflictError):
+        raise
+    except CalDAVTimeoutError:
+        raise
+    except Exception as e:
+        raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e

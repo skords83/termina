@@ -298,3 +298,102 @@ def test_get_events_enthält_etag(client, auth):
     events = r.json()
     assert len(events) >= 1
     assert "etag" in events[0]
+
+
+# ── PUT/DELETE: Serien-Bearbeitung/-Löschung mode='future' ────────────────────
+
+def _add_recurring_event(uid="recurring-uid-1", rrule="FREQ=WEEKLY"):
+    db = TestingSessionLocal()
+    db.add(Event(
+        uid=uid,
+        calendar_id=CAL_ID,
+        etag='"etag-rec"',
+        summary="Serientermin",
+        start=datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 1, 11, 0, tzinfo=timezone.utc),
+        all_day=False,
+        rrule=rrule,
+    ))
+    db.commit()
+    db.close()
+
+
+def test_put_event_future_erfolgreich(client, auth):
+    _add_recurring_event()
+    with patch("app.api.events.update_event_future", return_value="new-uid-xyz") as mock_fut, \
+         patch("app.api.events.run_sync"):
+        r = client.put("/api/events/recurring-uid-1", headers=auth, json={
+            "etag": '"etag-rec"',
+            "summary": "Geänderter Titel",
+            "start": "2026-06-15T14:00:00",
+            "end": "2026-06-15T15:00:00",
+            "recurrence_id": "2026-06-15T10:00:00",
+            "mode": "future",
+        })
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["uid"] == "recurring-uid-1"
+    assert body["new_uid"] == "new-uid-xyz"
+    mock_fut.assert_called_once()
+
+    db = TestingSessionLocal()
+    old = db.query(Event).filter(Event.uid == "recurring-uid-1").first()
+    new = db.query(Event).filter(Event.uid == "new-uid-xyz").first()
+    assert "UNTIL=" in old.rrule
+    assert new is not None
+    assert new.summary == "Geänderter Titel"
+    assert new.rrule == "FREQ=WEEKLY"
+    db.close()
+
+
+def test_put_event_future_ohne_recurrence_id(client, auth):
+    _add_recurring_event(uid="recurring-uid-2")
+    r = client.put("/api/events/recurring-uid-2", headers=auth, json={
+        "etag": '"etag-rec"',
+        "summary": "X",
+        "start": ISO_START,
+        "end": ISO_END,
+        "mode": "future",
+    })
+    assert r.status_code == 400
+
+
+def test_put_event_future_nicht_rekurrent(client, auth):
+    r = client.put("/api/events/existing-uid-1234", headers=auth, json={
+        "etag": '"etag-abc"',
+        "summary": "X",
+        "start": ISO_START,
+        "end": ISO_END,
+        "recurrence_id": "2026-06-15T10:00:00",
+        "mode": "future",
+    })
+    assert r.status_code == 400
+
+
+def test_delete_event_future_erfolgreich(client, auth):
+    _add_recurring_event(uid="recurring-uid-3")
+    with patch("app.api.events.delete_future_occurrences") as mock_del, \
+         patch("app.api.events.run_sync"):
+        r = client.delete(
+            "/api/events/recurring-uid-3",
+            params={"etag": '"etag-rec"', "recurrence_id": "2026-06-15T10:00:00", "mode": "future"},
+            headers=auth,
+        )
+
+    assert r.status_code == 204
+    mock_del.assert_called_once()
+
+    db = TestingSessionLocal()
+    old = db.query(Event).filter(Event.uid == "recurring-uid-3").first()
+    assert "UNTIL=" in old.rrule
+    db.close()
+
+
+def test_delete_event_future_nicht_rekurrent(client, auth):
+    r = client.delete(
+        "/api/events/existing-uid-1234",
+        params={"etag": '"etag-abc"', "recurrence_id": "2026-06-15T10:00:00", "mode": "future"},
+        headers=auth,
+    )
+    assert r.status_code == 400

@@ -789,7 +789,7 @@ export default function App() {
             calendars={calendars}
             event={editModal}
             onClose={() => setEditModal(null)}
-            onSaved={(_uid, ev) => {
+            onSaved={(_uid, ev, scope) => {
               if (!editModal.is_recurring) {
                 useHistoryStore.getState().record({
                   kind: 'update',
@@ -798,8 +798,15 @@ export default function App() {
                   after: ev,
                 });
               }
-              optimistic.updateOptimistic(ev);
-              setRefreshNonce((n) => n + 1);
+              if (scope === 'future') {
+                // 'future' spaltet die Serie server-seitig in ein neues Event auf
+                // (neue uid) — ein lokales Merge auf die alte uid wäre falsch,
+                // stattdessen nach kurzer Wartezeit (CalDAV-Sync) neu laden.
+                setTimeout(() => setRefreshNonce((n) => n + 1), 1000);
+              } else {
+                optimistic.updateOptimistic(ev);
+                setRefreshNonce((n) => n + 1);
+              }
             }}
           />
         )}

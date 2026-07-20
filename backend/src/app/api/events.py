@@ -32,8 +32,10 @@ from app.auth.dependencies import get_current_user
 from app.caldav.write import (
     create_event,
     update_event,
+    update_event_future,
     delete_event,
     delete_occurrence,
+    delete_future_occurrences,
     move_event,
     ConflictError,
     CalDAVTimeoutError,
@@ -77,6 +79,11 @@ class EventUpdate(BaseModel):
     # Bei Serien-Edit mit scope="single": recurrence_id der zu ändernden Instanz.
     # Das Backend legt dann einen EventOverride an statt den Master zu ändern.
     recurrence_id: datetime | None = None
+    # Bei Serien-Edit mit scope="future": recurrence_id ist der Split-Punkt.
+    # Die Serie wird an dieser Stelle per UNTIL getrennt, ein neues Event
+    # übernimmt mit den geänderten Feldern ab dort. mode=None ⇒ wie bisher
+    # aus recurrence_id ableiten (single vs. all).
+    mode: Literal["single", "future", "all"] | None = None
 
 
 class EventMove(BaseModel):
@@ -418,6 +425,61 @@ def put_event(
 
     rid_naive = body.recurrence_id.replace(tzinfo=None) if body.recurrence_id else None
 
+    # ── Scope: Dieser und alle folgenden ──────────────────────────────────────
+    if body.mode == "future":
+        if rid_naive is None:
+            raise HTTPException(status_code=400, detail="recurrence_id ist für mode='future' erforderlich")
+        if not event.rrule:
+            raise HTTPException(status_code=400, detail="mode='future' nur für rekurrente Events erlaubt")
+
+        try:
+            new_uid = update_event_future(
+                calendar_id=event.calendar_id,
+                uid=uid,
+                etag=body.etag,
+                summary=body.summary,
+                start=start_dt,
+                end=end_dt,
+                all_day=body.all_day,
+                location=body.location,
+                description=body.description,
+                recurrence_id=body.recurrence_id,
+            )
+        except ConflictError:
+            raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except CalDAVTimeoutError as e:
+            raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
+
+        until_dt = rid_naive - timedelta(seconds=1)
+        until_str = until_dt.strftime("%Y%m%dT%H%M%S")
+        new_master_rrule = _strip_rrule_str(event.rrule, {"UNTIL", "COUNT"})
+        event.rrule = f"{new_master_rrule};UNTIL={until_str}" if new_master_rrule else f"UNTIL={until_str}"
+
+        db.query(EventOverride).filter(
+            EventOverride.master_uid == uid,
+            EventOverride.recurrence_id >= rid_naive,
+        ).delete(synchronize_session=False)
+
+        db.add(Event(
+            uid=new_uid,
+            calendar_id=event.calendar_id,
+            etag=None,
+            summary=body.summary,
+            start=start_dt.replace(tzinfo=None) if start_dt.tzinfo else start_dt,
+            end=end_dt.replace(tzinfo=None) if end_dt.tzinfo else end_dt,
+            all_day=body.all_day,
+            rrule=new_master_rrule,
+            location=body.location,
+            description=body.description,
+            raw_ical=None,
+        ))
+        db.commit()
+
+        background.add_task(run_sync)
+        return {"uid": uid, "new_uid": new_uid}
+
     # ── Scope: Nur diese Instanz ──────────────────────────────────────────────
     if rid_naive is not None:
         existing_ov = (
@@ -635,6 +697,7 @@ def delete_event_endpoint(
     background: BackgroundTasks,
     etag: str | None = Query(None),
     recurrence_id: str | None = Query(None),
+    mode: Literal["single", "future", "all"] | None = Query(None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -642,6 +705,45 @@ def delete_event_endpoint(
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
     service.ensure_calendar_access(db, user, event.calendar_id)
+
+    # Diese und alle folgenden Instanzen einer Serie löschen (UNTIL-Split)
+    if recurrence_id is not None and mode == "future":
+        from datetime import datetime as dt_cls
+        try:
+            rid_dt = dt_cls.fromisoformat(recurrence_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Ungültige recurrence_id")
+        if not event.rrule:
+            raise HTTPException(status_code=400, detail="mode='future' nur für rekurrente Events erlaubt")
+
+        try:
+            delete_future_occurrences(
+                calendar_id=event.calendar_id,
+                uid=uid,
+                etag=etag,
+                recurrence_id=rid_dt,
+                all_day=event.all_day,
+            )
+        except ConflictError:
+            raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except CalDAVTimeoutError as e:
+            raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
+
+        rid_naive = rid_dt.replace(tzinfo=None) if rid_dt.tzinfo else rid_dt
+        until_dt = rid_naive - timedelta(seconds=1)
+        until_str = until_dt.strftime("%Y%m%dT%H%M%S")
+        new_master_rrule = _strip_rrule_str(event.rrule, {"UNTIL", "COUNT"})
+        event.rrule = f"{new_master_rrule};UNTIL={until_str}" if new_master_rrule else f"UNTIL={until_str}"
+
+        db.query(EventOverride).filter(
+            EventOverride.master_uid == uid,
+            EventOverride.recurrence_id >= rid_naive,
+        ).delete(synchronize_session=False)
+        db.commit()
+        background.add_task(run_sync)
+        return
 
     # Einzelne Instanz einer Serie löschen (EXDATE)
     if recurrence_id is not None:

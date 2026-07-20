@@ -53,7 +53,7 @@ export async function createEvent(
 export async function updateEvent(
   uid: string,
   payload: UpdateEventPayload
-): Promise<{ uid: string }> {
+): Promise<{ uid: string; new_uid?: string }> {
   const res = await fetch(`/api/events/${encodeURIComponent(uid)}`, {
     method: 'PUT',
     credentials: 'include',
@@ -90,6 +90,9 @@ export async function deleteEvent(
   if (payload.etag) params.set('etag', payload.etag);
   if (payload.recurrence_id) {
     params.set('recurrence_id', payload.recurrence_id);
+  }
+  if (payload.mode) {
+    params.set('mode', payload.mode);
   }
   const res = await fetch(
     `/api/events/${encodeURIComponent(uid)}?${params.toString()}`,

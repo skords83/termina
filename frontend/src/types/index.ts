@@ -39,13 +39,16 @@ export interface UpdateEventPayload {
   location?: string | null;
   description?: string | null;
   rrule?: string | null;
-  /** Nur bei Serientermin + editScope='single': recurrence_id der zu ändernden Instanz */
+  /** Nur bei Serientermin + editScope='single'|'future': recurrence_id der Instanz bzw. des Split-Punkts */
   recurrence_id?: string | null;
+  /** Nur bei Serientermin: explizite Bearbeitungs-Reichweite */
+  mode?: 'single' | 'future' | 'all';
 }
 
 export interface DeleteEventPayload {
   etag?: string | null;
   recurrence_id?: string | null;
+  mode?: 'single' | 'future' | 'all';
 }
 
 export type MoveMode = 'single' | 'future' | 'all';

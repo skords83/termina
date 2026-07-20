@@ -320,10 +320,10 @@ export function EventPopup({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const executeDelete = useCallback(async (recurrenceId?: string | null) => {
+  const executeDelete = useCallback(async (recurrenceId?: string | null, mode?: "single" | "future" | "all") => {
     setDeleting(true);
     try {
-      await deleteEvent(event.uid, { etag: event.etag ?? undefined, recurrence_id: recurrenceId });
+      await deleteEvent(event.uid, { etag: event.etag ?? undefined, recurrence_id: recurrenceId, mode });
       showToast("Termin gelöscht", "success");
       onDeleted(event.uid, recurrenceId);
       onClose();
@@ -455,7 +455,7 @@ export function EventPopup({
             <div className="rec-dialog-options">
               <button
                 className="rec-option"
-                onClick={() => { setRecurringDeleteDialog(false); executeDelete(event.recurrence_id); }}
+                onClick={() => { setRecurringDeleteDialog(false); executeDelete(event.recurrence_id, "single"); }}
                 disabled={deleting}
               >
                 <div className="rec-option-title">Nur diesen Termin</div>
@@ -465,7 +465,17 @@ export function EventPopup({
               </button>
               <button
                 className="rec-option"
-                onClick={() => { setRecurringDeleteDialog(false); executeDelete(); }}
+                onClick={() => { setRecurringDeleteDialog(false); executeDelete(event.recurrence_id, "future"); }}
+                disabled={deleting}
+              >
+                <div className="rec-option-title">Dieser und alle folgenden</div>
+                <div className="rec-option-desc">
+                  Dieser Termin und alle folgenden Instanzen werden gelöscht.
+                </div>
+              </button>
+              <button
+                className="rec-option"
+                onClick={() => { setRecurringDeleteDialog(false); executeDelete(undefined, "all"); }}
                 disabled={deleting}
               >
                 <div className="rec-option-title">Alle Termine der Serie</div>

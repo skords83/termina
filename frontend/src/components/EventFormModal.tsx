@@ -18,7 +18,7 @@ interface Calendar {
 interface BaseProps {
   calendars: Calendar[];
   onClose: () => void;
-  onSaved: (uid: string, event: CalendarEvent) => void;
+  onSaved: (uid: string, event: CalendarEvent, scope?: EditScope) => void;
 }
 
 interface CreateProps extends BaseProps {
@@ -406,7 +406,7 @@ function DatePicker({ value, min, onChange, disabled }: DatePickerProps) {
 
 // ── Scope-Dialog ──────────────────────────────────────────────────────────────
 
-type EditScope = "single" | "all";
+type EditScope = "single" | "future" | "all";
 
 interface ScopeDialogProps {
   onSelect: (scope: EditScope) => void;
@@ -436,6 +436,12 @@ function ScopeDialog({ onSelect, onCancel }: ScopeDialogProps) {
             <div className="rec-option-title">Nur dieser Termin</div>
             <div className="rec-option-desc">
               Nur diese eine Instanz wird geändert. Die Serie bleibt bestehen.
+            </div>
+          </button>
+          <button className="rec-option" onClick={() => onSelect("future")}>
+            <div className="rec-option-title">Dieser und alle folgenden</div>
+            <div className="rec-option-desc">
+              Änderungen gelten ab diesem Termin für alle folgenden Instanzen.
             </div>
           </button>
           <button className="rec-option" onClick={() => onSelect("all")}>
@@ -635,6 +641,9 @@ export function EventFormModal({
           ...(editScope === "single" && existingEvent!.recurrence_id
             ? { recurrence_id: existingEvent!.recurrence_id }
             : {}),
+          ...(editScope === "future" && existingEvent!.recurrence_id
+            ? { recurrence_id: existingEvent!.recurrence_id, mode: "future" as const }
+            : {}),
         });
         uid = result.uid;
         savedEvent = {
@@ -662,7 +671,7 @@ export function EventFormModal({
       }
 
       showToast(isEdit ? "Termin gespeichert" : "Termin erstellt", "success");
-      onSaved(uid, savedEvent);
+      onSaved(uid, savedEvent, isEdit ? editScope ?? undefined : undefined);
       onClose();
     } catch (err) {
       const writeErr = err as WriteError;
@@ -812,7 +821,7 @@ export function EventFormModal({
                 if (e.target.value === "none") setRecurUntil("");
                 setRecurExtraParts("");
               }}
-              disabled={editScope === "single"}
+              disabled={editScope === "single" || editScope === "future"}
             >
               {(Object.keys(FREQ_LABELS) as RecurFreq[]).map((f) => (
                 <option key={f} value={f}>
@@ -829,12 +838,12 @@ export function EventFormModal({
                 value={recurUntil}
                 min={startStr.slice(0, 10)}
                 onChange={setRecurUntil}
-                disabled={editScope === "single"}
+                disabled={editScope === "single" || editScope === "future"}
               />
             </div>
           )}
 
-          {editScope === "single" && (
+          {(editScope === "single" || editScope === "future") && (
             <p className="form-recur-note">
               Wiederholungseinstellungen gelten für alle Termine der Serie —
               hier nicht änderbar.
