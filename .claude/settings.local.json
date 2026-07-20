@@ -142,7 +142,12 @@
       "Bash(.venv/bin/python /tmp/claude-1000/-home-skords-Dokumente-Projekte-termina/e593c347-9181-43cc-85d6-52a6f04021cc/scratchpad/repro_override_bug.py)",
       "Bash(.venv/bin/python /tmp/claude-1000/-home-skords-Dokumente-Projekte-termina/e593c347-9181-43cc-85d6-52a6f04021cc/scratchpad/test_savepoint_isolation.py)",
       "Bash(.venv/bin/python -c \"import ast; ast.parse\\(open\\('src/app/caldav/sync.py'\\).read\\(\\)\\)\")",
-      "Bash(rm -f /tmp/claude-1000/-home-skords-Dokumente-Projekte-termina/e593c347-9181-43cc-85d6-52a6f04021cc/scratchpad/repro*.db)"
+      "Bash(rm -f /tmp/claude-1000/-home-skords-Dokumente-Projekte-termina/e593c347-9181-43cc-85d6-52a6f04021cc/scratchpad/repro*.db)",
+      "Bash(awk 'NR==648,NR==740' /home/skords/Dokumente/Projekts/termina/frontend/src/utils/naturalParser.ts)",
+      "Bash(sed -n '648,740p' /home/skords/Dokumente/Projekts/termina/frontend/src/utils/naturalParser.ts)",
+      "Bash(awk NR==217,NR==226{print NR\": \"$0} *)",
+      "Bash(npm install *)",
+      "Skill(run)"
     ]
   }
 }

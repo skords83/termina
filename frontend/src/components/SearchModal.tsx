@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { CalendarEvent, Calendar } from "../types/index";
+import { apiFetch, ApiError } from "../hooks/api";
 
 interface SearchModalProps {
-  events: CalendarEvent[];
   calendars: Calendar[];
   onClose: () => void;
   onEventClick: (event: CalendarEvent, rect: DOMRect) => void;
@@ -54,14 +54,20 @@ function descriptionSnippet(text: string, query: string): string | null {
   return (start > 0 ? "…" : "") + text.slice(start, end) + (end < text.length ? "…" : "");
 }
 
+const DEBOUNCE_MS = 250;
+
 export default function SearchModal({
-  events,
   calendars,
   onClose,
   onEventClick,
 }: SearchModalProps) {
   const [query, setQuery] = useState("");
+  const [calendarFilter, setCalendarFilter] = useState<string | null>(null);
+  const [results, setResults] = useState<CalendarEvent[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const requestSeq = useRef(0);
 
   const calMap = useMemo(() => {
     const m: Record<string, Calendar> = {};
@@ -82,33 +88,39 @@ export default function SearchModal({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setResults([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
 
-    return events
-      .filter((ev) => {
-        return (
-          ev.summary?.toLowerCase().includes(q) ||
-          ev.description?.toLowerCase().includes(q) ||
-          ev.location?.toLowerCase().includes(q)
-        );
+    setLoading(true);
+    const seq = ++requestSeq.current;
+    const timer = setTimeout(() => {
+      apiFetch<CalendarEvent[]>("/api/events/search", {
+        q: trimmed,
+        ...(calendarFilter ? { calendar_id: calendarFilter } : {}),
       })
-      .sort((a, b) => {
-        // Prioritize future events, then sort by date
-        const now = Date.now();
-        const aTime = parseLocalDate(a.start).getTime();
-        const bTime = parseLocalDate(b.start).getTime();
-        const aFuture = aTime >= now;
-        const bFuture = bTime >= now;
-        if (aFuture && !bFuture) return -1;
-        if (!aFuture && bFuture) return 1;
-        return aFuture
-          ? aTime - bTime           // future: soonest first
-          : bTime - aTime;          // past: most recent first
-      })
-      .slice(0, 50);
-  }, [query, events]);
+        .then((events) => {
+          if (seq !== requestSeq.current) return;
+          setResults(events);
+          setError(null);
+        })
+        .catch((err: ApiError) => {
+          if (seq !== requestSeq.current) return;
+          setError(err.message);
+        })
+        .finally(() => {
+          if (seq !== requestSeq.current) return;
+          setLoading(false);
+        });
+    }, DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [query, calendarFilter]);
 
   return (
     <div className="search-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -128,14 +140,41 @@ export default function SearchModal({
           )}
         </div>
 
+        {calendars.length > 1 && (
+          <div className="search-filter-row">
+            <button
+              className={`search-filter-chip${calendarFilter === null ? " active" : ""}`}
+              onClick={() => setCalendarFilter(null)}
+            >
+              Alle
+            </button>
+            {calendars.map((c) => (
+              <button
+                key={c.id}
+                className={`search-filter-chip${calendarFilter === c.id ? " active" : ""}`}
+                onClick={() => setCalendarFilter(calendarFilter === c.id ? null : c.id)}
+              >
+                <span className="search-filter-chip-dot" style={{ background: c.color || "#888" }} />
+                {c.name}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="search-results">
           {query.trim() === "" && (
             <div className="search-placeholder">Tipp, Ort oder Beschreibung eingeben…</div>
           )}
-          {query.trim() !== "" && results.length === 0 && (
+          {query.trim() !== "" && loading && (
+            <div className="search-loading">Suche…</div>
+          )}
+          {query.trim() !== "" && !loading && error && (
+            <div className="search-placeholder">Suche fehlgeschlagen: {error}</div>
+          )}
+          {query.trim() !== "" && !loading && !error && results.length === 0 && (
             <div className="search-placeholder">Keine Ergebnisse für „{query}"</div>
           )}
-          {results.map((ev) => {
+          {!loading && !error && results.map((ev) => {
             const cal = calMap[ev.calendar_id];
             const color = cal?.color || "#888";
             return (

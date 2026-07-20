@@ -194,6 +194,51 @@ def test_list_events_no_results_outside_range(client, auth):
     assert r.json() == []
 
 
+def test_search_events_no_auth(client):
+    r = client.get("/api/events/search", params={"q": "standup"})
+    assert r.status_code == 401
+
+
+def test_search_events_by_summary(client, auth):
+    r = client.get("/api/events/search", params={"q": "standup"}, headers=auth)
+    assert r.status_code == 200
+    uids = {e["uid"] for e in r.json()}
+    assert uids == {"evt-1"}
+
+
+def test_search_events_case_insensitive(client, auth):
+    r = client.get("/api/events/search", params={"q": "STANDUP"}, headers=auth)
+    assert r.status_code == 200
+    uids = {e["uid"] for e in r.json()}
+    assert uids == {"evt-1"}
+
+
+def test_search_events_no_match(client, auth):
+    r = client.get("/api/events/search", params={"q": "nonexistent-xyz"}, headers=auth)
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_search_events_calendar_filter(client, auth):
+    r = client.get(
+        "/api/events/search",
+        params={"q": "event", "calendar_id": "https://nc/cal/work"},
+        headers=auth,
+    )
+    assert r.status_code == 200
+    uids = {e["uid"] for e in r.json()}
+    assert uids == {"evt-2"}
+
+
+def test_search_events_unrestricted_by_date_window(client, auth):
+    """Anders als /api/events findet /api/events/search Treffer unabhängig vom
+    geladenen Zeitfenster des Clients (2026-06 liegt außerhalb 'heute')."""
+    r = client.get("/api/events/search", params={"q": "team"}, headers=auth)
+    assert r.status_code == 200
+    uids = {e["uid"] for e in r.json()}
+    assert uids == {"evt-1"}
+
+
 def test_healthz(client):
     r = client.get("/healthz")
     assert r.status_code == 200

@@ -810,7 +810,6 @@ export default function App() {
 
         {showSearch && (
           <SearchModal
-            events={visibleEvents}
             calendars={calendars}
             onClose={() => setShowSearch(false)}
             onEventClick={(ev, rect) => {

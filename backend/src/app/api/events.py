@@ -273,6 +273,101 @@ def get_events(
     return result
 
 
+# ── GET /search ─────────────────────────────────────────────────────────────
+
+# Suchfenster für Serientermine: weit genug für ein Ein-Personen-Kalender-Setup,
+# ohne bei jeder Suche unbegrenzt viele Instanzen expandieren zu müssen.
+_SEARCH_WINDOW = timedelta(days=3 * 365)
+
+
+def _text_matches(item: dict, needle: str) -> bool:
+    for field in ("summary", "location", "description"):
+        val = item.get(field)
+        if val and needle in val.lower():
+            return True
+    return False
+
+
+@router.get("/events/search")
+def search_events(
+    q: str = Query(min_length=1),
+    calendar_id: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    needle = q.strip().lower()
+    if not needle:
+        return []
+
+    accessible = service.accessible_calendar_ids(db, user)
+    base = db.query(Event)
+    if calendar_id:
+        service.ensure_calendar_access(db, user, calendar_id)
+        base = base.filter(Event.calendar_id == calendar_id)
+    elif accessible is not None:
+        base = base.filter(Event.calendar_id.in_(accessible))
+
+    # Case-insensitive Substring-Suche (inkl. Umlaute) läuft in Python, nicht in
+    # SQL: SQLite's LOWER()/LIKE ist nur für ASCII case-insensitive.
+    non_rrule = base.filter(Event.rrule.is_(None)).all()
+    rrule_events = base.filter(Event.rrule.isnot(None)).all()
+
+    now = datetime.now(_BERLIN).replace(tzinfo=None)
+    window_from = now - _SEARCH_WINDOW
+    window_to = now + _SEARCH_WINDOW
+
+    result = []
+
+    for e in non_rrule:
+        item = {
+            "uid": e.uid,
+            "calendar_id": e.calendar_id,
+            "summary": e.summary,
+            "start": _dt_to_iso(e.start, e.all_day),
+            "end": _dt_to_iso(e.end, e.all_day),
+            "all_day": e.all_day,
+            "location": e.location,
+            "etag": e.etag,
+            "description": e.description,
+            "is_recurring": False,
+            "recurrence_id": None,
+            "rrule": None,
+        }
+        if _text_matches(item, needle):
+            result.append(item)
+
+    overrides_by_uid: dict[str, dict[str, EventOverride]] = {}
+    if rrule_events:
+        uids = [e.uid for e in rrule_events]
+        all_overrides = (
+            db.query(EventOverride)
+            .filter(EventOverride.master_uid.in_(uids))
+            .all()
+        )
+        for ov in all_overrides:
+            if ov.recurrence_id is None:
+                continue
+            overrides_by_uid.setdefault(ov.master_uid, {})[ov.recurrence_id.isoformat()] = ov
+
+    for e in rrule_events:
+        instances = expand_rrule_event(e, window_from, window_to, overrides_by_uid.get(e.uid, {}))
+        result.extend(item for item in instances if _text_matches(item, needle))
+
+    def _sort_key(item: dict):
+        start_str = item["start"]
+        start_dt = (
+            datetime.fromisoformat(start_str)
+            if "T" in start_str
+            else datetime.strptime(start_str, "%Y-%m-%d")
+        ).replace(tzinfo=None)
+        if start_dt >= now:
+            return (0, start_dt.timestamp())
+        return (1, -start_dt.timestamp())
+
+    result.sort(key=_sort_key)
+    return result[:50]
+
+
 # ── POST: Erstellen ───────────────────────────────────────────────────────────
 
 @router.post("/events", status_code=201)
