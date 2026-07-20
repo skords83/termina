@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import admin_users, calendars, events, sync_api
+from app.api import admin_users, calendars, events, ics_api, sync_api
 from app.auth import router as auth_router
 from app.auth.service import bootstrap_initial_admin
 from app.config import settings
@@ -45,6 +45,7 @@ app.include_router(admin_users.router, prefix="/api")
 app.include_router(calendars.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
 app.include_router(sync_api.router, prefix="/api")
+app.include_router(ics_api.router, prefix="/api")
 
 
 @app.get("/healthz")

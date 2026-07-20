@@ -277,6 +277,20 @@ def create_event(
     return uid
 
 
+def import_ical_object(calendar_id: str, ical_bytes: bytes) -> None:
+    """Schreibt ein bereits fertig zusammengesetztes iCal-Objekt (Master + ggf.
+    Overrides, mit eindeutiger UID) direkt auf den CalDAV-Server. Für .ics-Import."""
+    client = _get_client()
+    cal = _find_caldav_calendar(client, calendar_id)
+    if cal is None:
+        raise ValueError(f"Kalender nicht gefunden: {calendar_id}")
+
+    _caldav_op_with_retry(
+        lambda: cal.save_event(ical_bytes),
+        context="import_ical_object",
+    )
+
+
 def update_event(
     calendar_id: str,
     uid: str,

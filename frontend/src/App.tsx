@@ -29,6 +29,7 @@ import WeekView from './components/WeekView';
 import DayView from './components/DayView';
 import AgendaView from './components/AgendaView';
 import SearchModal from './components/SearchModal';
+import ImportExportModal from './components/ImportExportModal';
 import { NaturalInputBar } from './components/NaturalInputBar';
 import { createEvent, moveEvent } from './api/write';
 
@@ -135,6 +136,7 @@ export default function App() {
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
   const [showSearch, setShowSearch] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showImportExport, setShowImportExport] = useState(false);
   const [showNatural, setShowNatural] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
@@ -331,7 +333,7 @@ export default function App() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const inInput = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
-      const anyModalOpen = !!document.querySelector('.natural-overlay, .event-form-overlay, .search-overlay, .event-popup, .recurring-move-overlay');
+      const anyModalOpen = !!document.querySelector('.natural-overlay, .event-form-overlay, .search-overlay, .event-popup, .recurring-move-overlay, .modal-backdrop');
 
       // ⌘K → Suche (funktioniert auch aus Inputs)
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -637,6 +639,14 @@ export default function App() {
                 <line x1="9" y1="4" x2="12" y2="7" />
               </svg>
             </button>
+            {/* Import/Export */}
+            <button className="toolbar-btn" onClick={() => setShowImportExport(true)} title="Import &amp; Export (.ics)">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 2v8" />
+                <path d="M4.5 6.5 8 10l3.5-3.5" />
+                <path d="M2.5 12.5h11" />
+              </svg>
+            </button>
             {/* Manueller Sync */}
             <button
               className={`toolbar-btn${syncing ? ' toolbar-btn--spinning' : ''}`}
@@ -813,6 +823,14 @@ export default function App() {
 
         {showAdmin && (
           <AdminUsersPage calendars={calendars} onClose={() => setShowAdmin(false)} />
+        )}
+
+        {showImportExport && (
+          <ImportExportModal
+            calendars={calendars}
+            onClose={() => setShowImportExport(false)}
+            onImported={() => setTimeout(() => setRefreshNonce((n) => n + 1), 1000)}
+          />
         )}
 
         {showSearch && (
