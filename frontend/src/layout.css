@@ -305,3 +305,16 @@
 .cal-item--hidden .cal-name {
   color: var(--text-3);
 }
+
+/* Sidebar Actions (Import/Sync, Nutzerverwaltung, Abmelden) */
+.sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.sidebar-actions .toolbar-btn:hover {
+  background: var(--bg-hover);
+}

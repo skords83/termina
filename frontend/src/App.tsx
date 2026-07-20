@@ -639,26 +639,6 @@ export default function App() {
                 <line x1="9" y1="4" x2="12" y2="7" />
               </svg>
             </button>
-            {/* Import/Export */}
-            <button className="toolbar-btn" onClick={() => setShowImportExport(true)} title="Import &amp; Export (.ics)">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M8 2v8" />
-                <path d="M4.5 6.5 8 10l3.5-3.5" />
-                <path d="M2.5 12.5h11" />
-              </svg>
-            </button>
-            {/* Manueller Sync */}
-            <button
-              className={`toolbar-btn${syncing ? ' toolbar-btn--spinning' : ''}`}
-              onClick={handleSync}
-              title="Sync mit CalDAV-Server"
-              disabled={syncing}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M13.5 8a5.5 5.5 0 1 1-1.1-3.3" />
-                <polyline points="13.5 2 13.5 5.5 10 5.5" />
-              </svg>
-            </button>
             <div className="view-switcher">
               {(['month', 'week', 'day', 'agenda'] as const).map((v) => (
                 <button
@@ -671,22 +651,19 @@ export default function App() {
               ))}
             </div>
             {eventsLoading && <span className="sync-indicator" title="Lädt…" />}
-            {user.role === 'admin' && (
-              <button className="logout-btn" onClick={() => setShowAdmin(true)} title="Nutzerverwaltung">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <circle cx="6" cy="5" r="2.5" />
-                  <path d="M1.5 14c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" />
-                  <circle cx="11.5" cy="5.5" r="2" />
-                  <path d="M10.5 10.2c1.9.3 3 1.5 3 3.8" />
-                </svg>
-              </button>
-            )}
-            <button className="logout-btn" onClick={handleLogout} title="Abmelden">⎋</button>
           </div>
         </header>
 
         <div className="main">
-          <Sidebar calendars={calendars} />
+          <Sidebar
+            calendars={calendars}
+            onImportExport={() => setShowImportExport(true)}
+            onSync={handleSync}
+            syncing={syncing}
+            isAdmin={user.role === 'admin'}
+            onShowAdmin={() => setShowAdmin(true)}
+            onLogout={handleLogout}
+          />
           <main className="content">
             {view === 'month' && (
               <MonthView
