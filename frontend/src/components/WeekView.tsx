@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { CalendarEvent, Calendar } from "../types/index";
@@ -9,6 +9,7 @@ interface WeekViewProps {
   calendars: Calendar[];
   onEventClick: (event: CalendarEvent, rect: DOMRect) => void;
   onDayClick: (date: Date) => void;
+  onEventResize: (event: CalendarEvent, newEnd: Date) => void;
 }
 
 const HOUR_HEIGHT = 56;
@@ -16,6 +17,7 @@ const START_HOUR = 0;
 const END_HOUR = 24;
 const TOTAL_HOURS = END_HOUR - START_HOUR;
 const MIN_EVENT_HEIGHT = 18;
+const RESIZE_SNAP_MINUTES = 15;
 
 // Konstante: per-pixel = Minuten — wird auch im App-Level DragEnd-Handler genutzt
 export const WEEK_PX_PER_MINUTE = HOUR_HEIGHT / 60;
@@ -78,6 +80,7 @@ function DraggableWeekEvent({
   startLabel,
   showTime,
   onEventClick,
+  onEventResize,
 }: {
   ev: CalendarEvent;
   top: number;
@@ -88,21 +91,65 @@ function DraggableWeekEvent({
   startLabel: string;
   showTime: boolean;
   onEventClick: (event: CalendarEvent, rect: DOMRect) => void;
+  onEventResize: (event: CalendarEvent, newEnd: Date) => void;
 }) {
   const { setNodeRef, listeners, attributes, isDragging } = useDraggable({
     id: `week-event-${ev.uid}-${ev.recurrence_id ?? ev.start}`,
     data: { event: ev, source: 'week' },
   });
 
+  const [resizeHeight, setResizeHeight] = useState<number | null>(null);
+  const resizeStartY = useRef(0);
+  const resizeBaseHeight = useRef(0);
+
+  const handleResizeStart = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    resizeStartY.current = e.clientY;
+    resizeBaseHeight.current = height;
+    setResizeHeight(height);
+
+    const snap = (rawHeight: number) => {
+      const rawMinutes = rawHeight / WEEK_PX_PER_MINUTE;
+      return Math.max(
+        RESIZE_SNAP_MINUTES,
+        Math.round(rawMinutes / RESIZE_SNAP_MINUTES) * RESIZE_SNAP_MINUTES
+      );
+    };
+
+    const onMove = (me: PointerEvent) => {
+      const deltaY = me.clientY - resizeStartY.current;
+      const snappedMinutes = snap(resizeBaseHeight.current + deltaY);
+      setResizeHeight(Math.max(snappedMinutes * WEEK_PX_PER_MINUTE, MIN_EVENT_HEIGHT));
+    };
+    const onUp = (ue: PointerEvent) => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      const deltaY = ue.clientY - resizeStartY.current;
+      const snappedMinutes = snap(resizeBaseHeight.current + deltaY);
+      setResizeHeight(null);
+      const baseMinutes = resizeBaseHeight.current / WEEK_PX_PER_MINUTE;
+      if (snappedMinutes !== Math.round(baseMinutes)) {
+        const evStart = parseLocalDate(ev.start);
+        const newEnd = new Date(evStart.getTime() + snappedMinutes * 60000);
+        onEventResize(ev, newEnd);
+      }
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  };
+
+  const displayHeight = resizeHeight ?? height;
+
   return (
     <div
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={`week-event${isDragging ? " week-event--dragging" : ""}`}
+      className={`week-event${isDragging ? " week-event--dragging" : ""}${resizeHeight !== null ? " week-event--resizing" : ""}`}
       style={{
         top,
-        height,
+        height: displayHeight,
         width,
         left,
         "--event-color": color,
@@ -113,7 +160,7 @@ function DraggableWeekEvent({
         onEventClick(ev, (e.currentTarget as HTMLElement).getBoundingClientRect());
       }}
     >
-      {height < 36 ? (
+      {displayHeight < 36 ? (
         <div className="week-event-compact">
           <span className="week-event-compact-dot" />
           <span className="week-event-compact-title">{ev.summary}</span>
@@ -133,6 +180,11 @@ function DraggableWeekEvent({
           )}
         </div>
       )}
+      <div
+        className="week-event-resize-handle"
+        onPointerDown={handleResizeStart}
+        onClick={(e) => e.stopPropagation()}
+      />
     </div>
   );
 }
@@ -180,6 +232,7 @@ export default function WeekView({
   calendars,
   onEventClick,
   onDayClick,
+  onEventResize,
 }: WeekViewProps) {
   const weekStart = getWeekStart(currentDate);
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -376,6 +429,7 @@ export default function WeekView({
                       startLabel={startLabel}
                       showTime={showTime}
                       onEventClick={onEventClick}
+                      onEventResize={onEventResize}
                     />
                   );
                 })}

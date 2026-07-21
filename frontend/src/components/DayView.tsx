@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { CalendarEvent, Calendar } from "../types/index";
@@ -9,11 +9,13 @@ interface DayViewProps {
   calendars: Calendar[];
   onEventClick: (event: CalendarEvent, rect: DOMRect) => void;
   onDayClick: (date: Date) => void;
+  onEventResize: (event: CalendarEvent, newEnd: Date) => void;
 }
 
 const HOUR_HEIGHT = 64;
 const TOTAL_HOURS = 24;
 const MIN_EVENT_HEIGHT = 20;
+const RESIZE_SNAP_MINUTES = 15;
 
 export const DAY_PX_PER_MINUTE = HOUR_HEIGHT / 60;
 
@@ -68,6 +70,7 @@ function DraggableDayEvent({
   showEndTime,
   showLocation,
   onEventClick,
+  onEventResize,
 }: {
   ev: CalendarEvent;
   top: number;
@@ -81,21 +84,66 @@ function DraggableDayEvent({
   showEndTime: boolean;
   showLocation: boolean;
   onEventClick: (event: CalendarEvent, rect: DOMRect) => void;
+  onEventResize: (event: CalendarEvent, newEnd: Date) => void;
 }) {
   const { setNodeRef, listeners, attributes, isDragging } = useDraggable({
     id: `day-event-${ev.uid}-${ev.recurrence_id ?? ev.start}`,
     data: { event: ev, source: 'day' },
   });
 
+  const [resizeHeight, setResizeHeight] = useState<number | null>(null);
+  const resizeStartY = useRef(0);
+  const resizeBaseHeight = useRef(0);
+
+  const handleResizeStart = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    resizeStartY.current = e.clientY;
+    resizeBaseHeight.current = height;
+    setResizeHeight(height);
+
+    const snap = (rawHeight: number) => {
+      const rawMinutes = rawHeight / DAY_PX_PER_MINUTE;
+      const snappedMinutes = Math.max(
+        RESIZE_SNAP_MINUTES,
+        Math.round(rawMinutes / RESIZE_SNAP_MINUTES) * RESIZE_SNAP_MINUTES
+      );
+      return snappedMinutes;
+    };
+
+    const onMove = (me: PointerEvent) => {
+      const deltaY = me.clientY - resizeStartY.current;
+      const snappedMinutes = snap(resizeBaseHeight.current + deltaY);
+      setResizeHeight(Math.max(snappedMinutes * DAY_PX_PER_MINUTE, MIN_EVENT_HEIGHT));
+    };
+    const onUp = (ue: PointerEvent) => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      const deltaY = ue.clientY - resizeStartY.current;
+      const snappedMinutes = snap(resizeBaseHeight.current + deltaY);
+      setResizeHeight(null);
+      const baseMinutes = resizeBaseHeight.current / DAY_PX_PER_MINUTE;
+      if (snappedMinutes !== Math.round(baseMinutes)) {
+        const evStart = parseLocalDate(ev.start);
+        const newEnd = new Date(evStart.getTime() + snappedMinutes * 60000);
+        onEventResize(ev, newEnd);
+      }
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  };
+
+  const displayHeight = resizeHeight ?? height;
+
   return (
     <div
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={`day-event${isDragging ? " day-event--dragging" : ""}`}
+      className={`day-event${isDragging ? " day-event--dragging" : ""}${resizeHeight !== null ? " day-event--resizing" : ""}`}
       style={{
         top,
-        height,
+        height: displayHeight,
         width,
         left,
         "--event-color": color,
@@ -106,7 +154,7 @@ function DraggableDayEvent({
         onEventClick(ev, (e.currentTarget as HTMLElement).getBoundingClientRect());
       }}
     >
-      {height < 28 ? (
+      {displayHeight < 28 ? (
         <div className="day-event-compact">
           <span className="day-event-compact-title">{ev.summary}</span>
         </div>
@@ -129,6 +177,11 @@ function DraggableDayEvent({
           )}
         </div>
       )}
+      <div
+        className="day-event-resize-handle"
+        onPointerDown={handleResizeStart}
+        onClick={(e) => e.stopPropagation()}
+      />
     </div>
   );
 }
@@ -168,6 +221,7 @@ export default function DayView({
   calendars,
   onEventClick,
   onDayClick,
+  onEventResize,
 }: DayViewProps) {
   const today = new Date();
   const isToday = sameDay(currentDate, today);
@@ -330,6 +384,7 @@ export default function DayView({
                   showEndTime={showEndTime}
                   showLocation={showLocation}
                   onEventClick={onEventClick}
+                  onEventResize={onEventResize}
                 />
               );
             })}

@@ -68,6 +68,35 @@
   cursor: grabbing;
 }
 
+/* ─── Resize Handle ──────────────────────────────────────────── */
+
+.day-event,
+.week-event {
+  position: relative;
+}
+
+.day-event-resize-handle,
+.week-event-resize-handle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.day-event:hover .day-event-resize-handle,
+.week-event:hover .week-event-resize-handle {
+  background: color-mix(in srgb, var(--text) 25%, transparent);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.day-event--resizing,
+.week-event--resizing {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
 /* ─── Recurring Move Dialog ──────────────────────────────────── */
 
 .modal-backdrop {

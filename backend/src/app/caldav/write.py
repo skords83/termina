@@ -521,6 +521,57 @@ def delete_occurrence(
         raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
 
 
+def restore_occurrence(
+    calendar_id: str,
+    uid: str,
+    etag: str | None,
+    recurrence_id: datetime,
+    all_day: bool = False,
+) -> None:
+    """Entfernt ein EXDATE vom Master (Gegenstück zu delete_occurrence, für Undo)."""
+    try:
+        client = _get_client()
+        cal = _find_caldav_calendar(client, calendar_id)
+        if cal is None:
+            raise ValueError(f"Kalender nicht gefunden: {calendar_id}")
+
+        obj = _find_caldav_event(cal, uid)
+        if obj is None:
+            raise ValueError(f"Event nicht gefunden: {uid}")
+
+        current_etag = _get_etag(obj)
+        if current_etag and etag and current_etag != etag:
+            raise ConflictError(f"ETag-Konflikt für Event {uid}")
+
+        ical = Calendar.from_ical(obj.data)
+        master = _find_master(ical)
+        if master is None:
+            raise ValueError("Kein Master-VEVENT gefunden")
+
+        exdate_target = _to_midnight_utc(recurrence_id) if all_day else _to_utc(recurrence_id)
+        existing_exdates = master.get("EXDATE")
+        if existing_exdates is not None:
+            if not isinstance(existing_exdates, list):
+                existing_exdates = [existing_exdates]
+            all_dts = []
+            for ex in existing_exdates:
+                dts = ex.dts if hasattr(ex, "dts") else [ex]
+                all_dts.extend(dt.dt for dt in dts)
+            remaining = [dt for dt in all_dts if not _dt_equal(dt, exdate_target)]
+            del master["EXDATE"]
+            if remaining:
+                master.add("EXDATE", remaining)
+
+        obj.data = ical.to_ical()
+        _caldav_op_with_retry(obj.save, context=f"restore_occurrence({uid}, {recurrence_id})")
+    except (ValueError, ConflictError):
+        raise
+    except CalDAVTimeoutError:
+        raise
+    except Exception as e:
+        raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
+
+
 # ── Move: alle drei Modi ─────────────────────────────────────────────────────
 
 MoveMode = Literal["single", "future", "all"]
@@ -593,6 +644,100 @@ def move_event(
         if "timeout" in str(e).lower() or "ReadTimeout" in type(e).__name__:
             raise CalDAVTimeoutError(f"CalDAV-Server nicht erreichbar: {e}") from e
         raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
+
+
+def resize_event(
+    mode: MoveMode,
+    calendar_id: str,
+    uid: str,
+    etag: str | None,
+    occurrence_start: datetime,
+    new_end: datetime,
+    all_day: bool = False,
+    recurrence_id: datetime | None = None,
+) -> dict:
+    """Ändert die Dauer eines Events (DTSTART bleibt, DTEND ändert sich). Returns dict, ggf. mit 'new_uid' bei mode='future'."""
+    try:
+        client = _get_client()
+        cal = _find_caldav_calendar(client, calendar_id)
+        if cal is None:
+            raise ValueError(f"Kalender nicht gefunden: {calendar_id}")
+
+        obj = _find_caldav_event(cal, uid)
+        if obj is None:
+            raise ValueError(f"Event nicht gefunden: {uid}")
+
+        current_etag = _get_etag(obj)
+        if current_etag and etag and current_etag != etag:
+            raise ConflictError(f"ETag-Konflikt für Event {uid}")
+
+        ical = Calendar.from_ical(obj.data)
+        master = _find_master(ical)
+        if master is None:
+            raise ValueError("Kein Master-VEVENT gefunden")
+
+        result: dict = {}
+
+        if mode == "all":
+            o = occurrence_start.replace(tzinfo=None) if occurrence_start.tzinfo else occurrence_start
+            n = new_end.replace(tzinfo=None) if new_end.tzinfo else new_end
+            duration = n - o
+            _apply_resize_all(ical, master, duration, all_day)
+            obj.data = ical.to_ical()
+            _caldav_op_with_retry(obj.save, context=f"resize_event(all, {uid})")
+
+        elif mode == "single":
+            if recurrence_id is None:
+                raise ValueError("recurrence_id ist für mode='single' erforderlich")
+            _apply_move_single(ical, master, uid, recurrence_id, occurrence_start, new_end, all_day)
+            obj.data = ical.to_ical()
+            _caldav_op_with_retry(obj.save, context=f"resize_event(single, {uid})")
+
+        elif mode == "future":
+            if recurrence_id is None:
+                raise ValueError("recurrence_id ist für mode='future' erforderlich")
+            new_uid = _apply_move_future(cal, ical, master, recurrence_id, occurrence_start, new_end, all_day)
+            obj.data = ical.to_ical()
+            _caldav_op_with_retry(obj.save, context=f"resize_event(future, {uid})")
+            result["new_uid"] = new_uid
+
+        else:
+            raise ValueError(f"Unbekannter mode: {mode}")
+
+        return result
+
+    except (ValueError, ConflictError):
+        raise
+    except CalDAVTimeoutError:
+        raise
+    except Exception as e:
+        logger.exception("resize_event(%s) failed", mode)
+        if "timeout" in str(e).lower() or "ReadTimeout" in type(e).__name__:
+            raise CalDAVTimeoutError(f"CalDAV-Server nicht erreichbar: {e}") from e
+        raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
+
+
+def _apply_resize_all(
+    ical: Calendar,
+    master: ICalEvent,
+    duration: timedelta,
+    all_day: bool,
+) -> None:
+    _set_duration(master, duration, all_day)
+    for override in _find_overrides(ical):
+        _set_duration(override, duration, all_day)
+
+
+def _set_duration(comp: ICalEvent, duration: timedelta, all_day: bool) -> None:
+    dtstart = comp.get("DTSTART")
+    if dtstart is None:
+        return
+    start = dtstart.dt
+    comp.pop("DTEND", None)
+    if all_day:
+        comp.add("DTEND", start + duration)
+    elif isinstance(start, datetime):
+        comp.add("DTEND", start + duration)
 
 
 def _apply_move_all(

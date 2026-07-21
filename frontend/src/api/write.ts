@@ -7,6 +7,8 @@ import type {
   UpdateEventPayload,
   DeleteEventPayload,
   MoveEventPayload,
+  ResizeEventPayload,
+  RestoreOccurrencePayload,
   WriteError,
 } from '../types';
 
@@ -71,6 +73,38 @@ export async function moveEvent(
   payload: MoveEventPayload
 ): Promise<{ uid: string; new_uid?: string }> {
   const res = await fetch(`/api/events/${encodeURIComponent(uid)}/move`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: headers(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}
+
+// ── POST /api/events/{uid}/resize ────────────────────────────────
+
+export async function resizeEvent(
+  uid: string,
+  payload: ResizeEventPayload
+): Promise<{ uid: string; new_uid?: string }> {
+  const res = await fetch(`/api/events/${encodeURIComponent(uid)}/resize`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: headers(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}
+
+// ── POST /api/events/{uid}/restore-occurrence ────────────────────
+
+export async function restoreOccurrence(
+  uid: string,
+  payload: RestoreOccurrencePayload
+): Promise<{ uid: string }> {
+  const res = await fetch(`/api/events/${encodeURIComponent(uid)}/restore-occurrence`, {
     method: 'POST',
     credentials: 'include',
     headers: headers(),

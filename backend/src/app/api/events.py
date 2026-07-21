@@ -38,6 +38,8 @@ from app.caldav.write import (
     delete_future_occurrences,
     move_event,
     move_event_calendar,
+    resize_event,
+    restore_occurrence,
     ConflictError,
     CalDAVTimeoutError,
 )
@@ -97,6 +99,19 @@ class EventMove(BaseModel):
     new_start: datetime
     new_end: datetime
     recurrence_id: datetime | None = None
+
+
+class EventResize(BaseModel):
+    mode: Literal["single", "future", "all"]
+    etag: str | None = None
+    occurrence_start: datetime
+    new_end: datetime
+    recurrence_id: datetime | None = None
+
+
+class OccurrenceRestore(BaseModel):
+    etag: str | None = None
+    recurrence_id: datetime
 
 
 # ── RRULE-Expansion mit Override-Anwendung ────────────────────────────────────
@@ -730,6 +745,170 @@ def post_move(
     if "new_uid" in result:
         response["new_uid"] = result["new_uid"]
     return response
+
+
+# ── POST /resize: Dauer ändern (Drag am unteren Rand) ─────────────────────────
+
+@router.post("/events/{uid}/resize")
+def post_resize(
+    uid: str,
+    body: EventResize,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    event = db.query(Event).filter(Event.uid == uid).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event nicht gefunden")
+    service.ensure_calendar_access(db, user, event.calendar_id)
+
+    if body.mode in ("single", "future") and body.recurrence_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"recurrence_id ist für mode='{body.mode}' erforderlich",
+        )
+
+    if body.mode in ("single", "future") and not event.rrule:
+        raise HTTPException(
+            status_code=400,
+            detail=f"mode='{body.mode}' nur für rekurrente Events erlaubt",
+        )
+
+    try:
+        result = resize_event(
+            mode=body.mode,
+            calendar_id=event.calendar_id,
+            uid=uid,
+            etag=body.etag,
+            occurrence_start=body.occurrence_start,
+            new_end=body.new_end,
+            all_day=event.all_day,
+            recurrence_id=body.recurrence_id,
+        )
+    except ConflictError:
+        raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except CalDAVTimeoutError as e:
+        raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
+
+    # Lokale DB sofort aktualisieren
+    if body.mode == "all":
+        occ_naive = body.occurrence_start.replace(tzinfo=None)
+        new_end_naive = body.new_end.replace(tzinfo=None)
+        duration = new_end_naive - occ_naive
+        if event.start is not None and event.end is not None:
+            event.end = event.start + duration
+        for ov in db.query(EventOverride).filter(EventOverride.master_uid == uid).all():
+            if ov.start is not None:
+                ov.end = ov.start + duration
+        db.commit()
+
+    elif body.mode == "single":
+        rid_naive = body.recurrence_id.replace(tzinfo=None) if body.recurrence_id else None
+        if rid_naive is not None:
+            existing_ov = (
+                db.query(EventOverride)
+                .filter(
+                    EventOverride.master_uid == uid,
+                    EventOverride.recurrence_id == rid_naive,
+                )
+                .first()
+            )
+            new_end_naive = body.new_end.replace(tzinfo=None)
+            if existing_ov is not None:
+                existing_ov.end = new_end_naive
+            else:
+                db.add(EventOverride(
+                    master_uid=uid,
+                    recurrence_id=rid_naive,
+                    start=rid_naive,
+                    end=new_end_naive,
+                ))
+            db.commit()
+
+    elif body.mode == "future":
+        rid_naive = body.recurrence_id.replace(tzinfo=None) if body.recurrence_id else None
+        occ_naive = body.occurrence_start.replace(tzinfo=None)
+        new_end_naive = body.new_end.replace(tzinfo=None)
+
+        if rid_naive is not None and event.rrule:
+            until_dt = rid_naive - timedelta(seconds=1)
+            until_str = until_dt.strftime("%Y%m%dT%H%M%S")
+            new_master_rrule = _strip_rrule_str(event.rrule, {"UNTIL", "COUNT"})
+            event.rrule = f"{new_master_rrule};UNTIL={until_str}" if new_master_rrule else f"UNTIL={until_str}"
+
+            db.query(EventOverride).filter(
+                EventOverride.master_uid == uid,
+                EventOverride.recurrence_id >= rid_naive,
+            ).delete(synchronize_session=False)
+
+        if "new_uid" in result and result["new_uid"]:
+            fresh_rrule = _strip_rrule_str(event.rrule, {"UNTIL", "COUNT"}) if event.rrule else None
+            db.add(Event(
+                uid=result["new_uid"],
+                calendar_id=event.calendar_id,
+                etag=None,
+                summary=event.summary,
+                start=occ_naive,
+                end=new_end_naive,
+                all_day=event.all_day,
+                rrule=new_master_rrule if (rid_naive is not None and event.rrule) else fresh_rrule,
+                location=event.location,
+                description=event.description,
+                raw_ical=None,
+            ))
+
+        db.commit()
+
+    background.add_task(run_sync)
+
+    response = {"uid": uid}
+    if "new_uid" in result:
+        response["new_uid"] = result["new_uid"]
+    return response
+
+
+# ── POST /restore-occurrence: EXDATE entfernen (Undo für Einzel-Löschung) ─────
+
+@router.post("/events/{uid}/restore-occurrence")
+def post_restore_occurrence(
+    uid: str,
+    body: OccurrenceRestore,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    event = db.query(Event).filter(Event.uid == uid).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event nicht gefunden")
+    service.ensure_calendar_access(db, user, event.calendar_id)
+
+    try:
+        restore_occurrence(
+            calendar_id=event.calendar_id,
+            uid=uid,
+            etag=body.etag,
+            recurrence_id=body.recurrence_id,
+            all_day=event.all_day,
+        )
+    except ConflictError:
+        raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except CalDAVTimeoutError as e:
+        raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
+
+    rid_naive = body.recurrence_id.replace(tzinfo=None)
+    db.query(EventOverride).filter(
+        EventOverride.master_uid == uid,
+        EventOverride.recurrence_id == rid_naive,
+        EventOverride.start.is_(None),
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    background.add_task(run_sync)
+    return {"uid": uid}
 
 
 # ── DELETE: Löschen ───────────────────────────────────────────────────────────

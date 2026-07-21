@@ -23,6 +23,7 @@ import { EventFormModal } from './components/EventFormModal';
 import { RecurringMoveDialog } from './components/RecurringMoveDialog';
 import { useOptimisticStore, useMergedEvents } from './store/eventsSlice';
 import { useHistoryStore } from './store/historySlice';
+import { useRefreshBus } from './store/refreshBus';
 import { useWindowFocusGuard } from './hooks/useWindowFocusGuard';
 import { CalendarEvent, MoveMode } from './types';
 import WeekView from './components/WeekView';
@@ -31,7 +32,7 @@ import AgendaView from './components/AgendaView';
 import SearchModal from './components/SearchModal';
 import ImportExportModal from './components/ImportExportModal';
 import { NaturalInputBar } from './components/NaturalInputBar';
-import { createEvent, moveEvent } from './api/write';
+import { createEvent, moveEvent, resizeEvent } from './api/write';
 
 const MONTHS = [
   'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
@@ -121,6 +122,11 @@ interface PendingMove {
   newEnd: Date;
 }
 
+interface PendingResize {
+  event: CalendarEvent;
+  newEnd: Date;
+}
+
 export default function App() {
   const { user, setUser, clearUser, activeMonth, setActiveMonth, hiddenCalendars, isCalendarVisible } =
     useStore();
@@ -158,9 +164,18 @@ export default function App() {
   // DnD-State
   const [activeDrag, setActiveDrag] = useState<CalendarEvent | null>(null);
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
+  const [pendingResize, setPendingResize] = useState<PendingResize | null>(null);
 
   // Refetch-Trigger: bumpen nach erfolgreichen Schreib-Operationen
   const [refreshNonce, setRefreshNonce] = useState(0);
+
+  // Undo/Redo für Serientermine (historySlice.ts) läuft entkoppelt von diesem
+  // Component-State und stößt einen Refetch über den refreshBus an.
+  const busNonce = useRefreshBus((s) => s.nonce);
+  useEffect(() => {
+    if (busNonce === 0) return;
+    setRefreshNonce((n) => n + 1);
+  }, [busNonce]);
 
   const [currentDate, setCurrentDate] = useState<Date>(() => {
     const d = new Date();
@@ -552,7 +567,7 @@ export default function App() {
     }
 
     try {
-      await moveEvent(ev.uid, {
+      const result = await moveEvent(ev.uid, {
         mode,
         etag: ev.etag!,
         original_start: ev.start,
@@ -561,14 +576,14 @@ export default function App() {
         recurrence_id: ev.recurrence_id ?? null,
       });
 
-      if (!ev.is_recurring) {
-        useHistoryStore.getState().record({
-          kind: 'move',
-          uid: ev.uid,
-          before: ev,
-          after: { ...ev, start: newStartIso, end: newEndIso },
-        });
-      }
+      useHistoryStore.getState().record({
+        kind: 'move',
+        uid: ev.uid,
+        before: ev,
+        after: { ...ev, start: newStartIso, end: newEndIso },
+        scope: ev.is_recurring ? mode : undefined,
+        splitUid: mode === 'future' ? result.new_uid ?? null : undefined,
+      });
 
       // Backend hat geschrieben + run_sync als BackgroundTask gestartet.
       // Kurz warten, damit der Sync die DB aktualisiert hat, dann refetchen.
@@ -600,6 +615,74 @@ export default function App() {
     const { event, newStart, newEnd } = pendingMove;
     setPendingMove(null);
     executeMove(event, mode, newStart, newEnd);
+  }
+
+  function handleEventResize(ev: CalendarEvent, newEnd: Date) {
+    if (!ev.etag) {
+      console.warn('Event hat kein ETag — nicht änderbar', ev);
+      return;
+    }
+    if (ev.is_recurring) {
+      setPendingResize({ event: ev, newEnd });
+    } else {
+      executeResize(ev, 'all', newEnd);
+    }
+  }
+
+  async function executeResize(ev: CalendarEvent, mode: MoveMode, newEnd: Date) {
+    const newEndIso = toIsoLocal(newEnd);
+
+    // Optimistic update nur für nicht-rekurrente Events (siehe executeMove).
+    if (!ev.is_recurring) {
+      optimistic.updateOptimistic({
+        ...ev,
+        end: newEndIso,
+      });
+    }
+
+    try {
+      const result = await resizeEvent(ev.uid, {
+        mode,
+        etag: ev.etag!,
+        occurrence_start: ev.start,
+        new_end: newEndIso,
+        recurrence_id: ev.recurrence_id ?? null,
+      });
+
+      useHistoryStore.getState().record({
+        kind: 'resize',
+        uid: ev.uid,
+        before: ev,
+        after: { ...ev, end: newEndIso },
+        scope: ev.is_recurring ? mode : undefined,
+        splitUid: mode === 'future' ? result.new_uid ?? null : undefined,
+      });
+
+      setTimeout(() => {
+        setRefreshNonce((n) => n + 1);
+      }, 1000);
+    } catch (err: any) {
+      if (!ev.is_recurring) {
+        optimistic.rollbackUpdate(ev.uid);
+      }
+      if (err?.type === 'conflict') {
+        alert('Konflikt: Termin wurde extern geändert. Bitte neu laden.');
+      } else if (err?.type === 'caldav_down') {
+        alert('CalDAV-Server nicht erreichbar.');
+      } else if (err?.type === 'bad_request') {
+        alert(`Ungültige Anfrage: ${err.message}`);
+      } else {
+        alert('Dauer ändern fehlgeschlagen.');
+      }
+      console.error('resizeEvent failed', err);
+    }
+  }
+
+  function handleRecurringResizeChoice(mode: MoveMode) {
+    if (!pendingResize) return;
+    const { event, newEnd } = pendingResize;
+    setPendingResize(null);
+    executeResize(event, mode, newEnd);
   }
 
   if (authLoading) {
@@ -725,6 +808,7 @@ export default function App() {
                   setCurrentDate(date);
                   setView('day');
                 }}
+                onEventResize={handleEventResize}
               />
             )}
             {view === 'day' && (
@@ -734,6 +818,7 @@ export default function App() {
                 calendars={visibleCalendars}
                 onEventClick={(ev, rect) => handleEventClick(ev, rect)}
                 onDayClick={(date) => { if (!isFocusClick()) setCreateModal({ defaultDate: toDateStr(date) }); }}
+                onEventResize={handleEventResize}
               />
             )}
             {view === 'agenda' && (
@@ -757,17 +842,27 @@ export default function App() {
             onEdit={(ev) => { setSelectedEvent(null); setEditModal(ev); }}
             onDuplicate={(ev) => { setSelectedEvent(null); setDuplicateModal(ev); }}
             onCopy={(ev) => { clipboardEventRef.current = ev; }}
-            onDeleted={(uid, recurrenceId) => {
+            onDeleted={(uid, recurrenceId, mode) => {
               if (recurrenceId) {
-                optimistic.deleteOptimistic(uid, recurrenceId);
-                setRefreshNonce((n) => n + 1);
-              } else {
-                if (selectedEvent && !selectedEvent.is_recurring) {
+                if (selectedEvent) {
                   useHistoryStore.getState().record({
                     kind: 'delete',
                     uid,
                     before: selectedEvent,
                     after: null,
+                    scope: mode,
+                  });
+                }
+                optimistic.deleteOptimistic(uid, recurrenceId);
+                setRefreshNonce((n) => n + 1);
+              } else {
+                if (selectedEvent) {
+                  useHistoryStore.getState().record({
+                    kind: 'delete',
+                    uid,
+                    before: selectedEvent,
+                    after: null,
+                    scope: mode,
                   });
                 }
                 optimistic.deleteOptimistic(uid);
@@ -780,17 +875,16 @@ export default function App() {
           <EventFormModal
             mode="create"
             calendars={calendars}
+            events={events}
             defaultDate={createModal.defaultDate}
             onClose={() => setCreateModal(null)}
             onSaved={(_uid, ev) => {
-              if (!ev.is_recurring) {
-                useHistoryStore.getState().record({
-                  kind: 'create',
-                  uid: ev.uid,
-                  before: null,
-                  after: ev,
-                });
-              }
+              useHistoryStore.getState().record({
+                kind: 'create',
+                uid: ev.uid,
+                before: null,
+                after: ev,
+              });
               optimistic.addOptimistic(ev);
               setRefreshNonce((n) => n + 1);
             }}
@@ -801,17 +895,16 @@ export default function App() {
           <EventFormModal
             mode="create"
             calendars={calendars}
+            events={events}
             duplicateFrom={duplicateModal}
             onClose={() => setDuplicateModal(null)}
             onSaved={(_uid, ev) => {
-              if (!ev.is_recurring) {
-                useHistoryStore.getState().record({
-                  kind: 'create',
-                  uid: ev.uid,
-                  before: null,
-                  after: ev,
-                });
-              }
+              useHistoryStore.getState().record({
+                kind: 'create',
+                uid: ev.uid,
+                before: null,
+                after: ev,
+              });
               optimistic.addOptimistic(ev);
               setRefreshNonce((n) => n + 1);
             }}
@@ -822,22 +915,25 @@ export default function App() {
           <EventFormModal
             mode="edit"
             calendars={calendars}
+            events={events}
             event={editModal}
             onClose={() => setEditModal(null)}
-            onSaved={(_uid, ev, scope) => {
-              if (!editModal.is_recurring) {
-                useHistoryStore.getState().record({
-                  kind: 'update',
-                  uid: ev.uid,
-                  before: editModal,
-                  after: ev,
-                });
-              }
+            onSaved={(_uid, ev, scope, newUid) => {
+              useHistoryStore.getState().record({
+                kind: 'update',
+                uid: ev.uid,
+                before: editModal,
+                after: ev,
+                scope,
+                splitUid: scope === 'future' ? newUid ?? null : undefined,
+              });
               if (scope === 'future') {
                 // 'future' spaltet die Serie server-seitig in ein neues Event auf
                 // (neue uid) — ein lokales Merge auf die alte uid wäre falsch,
                 // stattdessen nach kurzer Wartezeit (CalDAV-Sync) neu laden.
                 setTimeout(() => setRefreshNonce((n) => n + 1), 1000);
+              } else if (editModal.is_recurring) {
+                setRefreshNonce((n) => n + 1);
               } else {
                 optimistic.updateOptimistic(ev);
                 setRefreshNonce((n) => n + 1);
@@ -914,6 +1010,15 @@ export default function App() {
             summary={pendingMove.event.summary}
             onChoose={handleRecurringChoice}
             onCancel={() => setPendingMove(null)}
+          />
+        )}
+
+        {pendingResize && (
+          <RecurringMoveDialog
+            summary={pendingResize.event.summary}
+            action="resize"
+            onChoose={handleRecurringResizeChoice}
+            onCancel={() => setPendingResize(null)}
           />
         )}
       </div>

@@ -3,11 +3,12 @@ import type { MoveMode } from '../types';
 
 interface Props {
   summary: string;
+  action?: 'move' | 'resize';
   onChoose: (mode: MoveMode) => void;
   onCancel: () => void;
 }
 
-export function RecurringMoveDialog({ summary, onChoose, onCancel }: Props) {
+export function RecurringMoveDialog({ summary, action = 'move', onChoose, onCancel }: Props) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onCancel();
@@ -16,11 +17,13 @@ export function RecurringMoveDialog({ summary, onChoose, onCancel }: Props) {
     return () => window.removeEventListener('keydown', handler);
   }, [onCancel]);
 
+  const isResize = action === 'resize';
+
   return (
     <div className="modal-backdrop" onClick={onCancel}>
       <div className="rec-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="rec-dialog-header">
-          <h3 className="rec-dialog-title">Termin verschieben</h3>
+          <h3 className="rec-dialog-title">{isResize ? 'Termin-Dauer ändern' : 'Termin verschieben'}</h3>
           <p className="rec-dialog-sub">„{summary}" ist ein Serientermin.</p>
         </div>
 
@@ -31,7 +34,9 @@ export function RecurringMoveDialog({ summary, onChoose, onCancel }: Props) {
           >
             <div className="rec-option-title">Nur diesen Termin</div>
             <div className="rec-option-desc">
-              Nur diese eine Instanz wird verschoben. Die Serie bleibt unverändert.
+              {isResize
+                ? 'Nur diese eine Instanz wird verändert. Die Serie bleibt unverändert.'
+                : 'Nur diese eine Instanz wird verschoben. Die Serie bleibt unverändert.'}
             </div>
           </button>
 
@@ -51,7 +56,9 @@ export function RecurringMoveDialog({ summary, onChoose, onCancel }: Props) {
           >
             <div className="rec-option-title">Alle Termine der Serie</div>
             <div className="rec-option-desc">
-              Die gesamte Serie wird um den gleichen Zeitabstand verschoben.
+              {isResize
+                ? 'Alle Termine der Serie erhalten die gleiche neue Dauer.'
+                : 'Die gesamte Serie wird um den gleichen Zeitabstand verschoben.'}
             </div>
           </button>
         </div>

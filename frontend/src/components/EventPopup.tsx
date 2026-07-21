@@ -29,7 +29,7 @@ interface Props {
   onEdit: (event: CalendarEvent) => void;
   onDuplicate: (event: CalendarEvent) => void;
   onCopy: (event: CalendarEvent) => void;
-  onDeleted: (uid: string, recurrenceId?: string | null) => void;
+  onDeleted: (uid: string, recurrenceId?: string | null, mode?: "single" | "future" | "all") => void;
 }
 
 // ── Formatierung ──────────────────────────────────────────────────────────────
@@ -343,7 +343,7 @@ export function EventPopup({
     try {
       await deleteEvent(event.uid, { etag: event.etag ?? undefined, recurrence_id: recurrenceId, mode });
       showToast("Termin gelöscht", "success");
-      onDeleted(event.uid, recurrenceId);
+      onDeleted(event.uid, recurrenceId, mode);
       onClose();
     } catch (err) {
       const writeErr = err as WriteError;

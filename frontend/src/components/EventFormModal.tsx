@@ -4,7 +4,7 @@
 // Unterstützt Serientermine (RRULE).
 // Verwendet custom DatePicker statt nativem <input type="date">.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createEvent, updateEvent } from "../api/write";
 import { useToast } from "./Toast";
 import type { CalendarEvent, CreateEventPayload, WriteError } from "../types";
@@ -17,8 +17,9 @@ interface Calendar {
 
 interface BaseProps {
   calendars: Calendar[];
+  events?: CalendarEvent[];
   onClose: () => void;
-  onSaved: (uid: string, event: CalendarEvent, scope?: EditScope) => void;
+  onSaved: (uid: string, event: CalendarEvent, scope?: EditScope, newUid?: string) => void;
 }
 
 interface CreateProps extends BaseProps {
@@ -543,6 +544,7 @@ function DateTimeField({
 
 export function EventFormModal({
   calendars,
+  events = [],
   onClose,
   onSaved,
   ...props
@@ -645,6 +647,27 @@ export function EventFormModal({
     rrule: buildRrule(recurFreq, recurUntil, recurCount, recurExtraParts),
   });
 
+  const overlap = useMemo(() => {
+    if (allDay || !startStr || !endStr) return null;
+    const candStart = new Date(localDatetimeToISO(startStr)).getTime();
+    const candEnd = new Date(localDatetimeToISO(endStr)).getTime();
+    if (!(candEnd > candStart)) return null;
+
+    for (const other of events) {
+      if (other.all_day) continue;
+      if (existingEvent && other.uid === existingEvent.uid) continue;
+      const otherStart = new Date(other.start).getTime();
+      const otherEnd = new Date(other.end).getTime();
+      if (otherStart < candEnd && otherEnd > candStart) {
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const d = new Date(other.start);
+        const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        return { summary: other.summary, time };
+      }
+    }
+    return null;
+  }, [allDay, startStr, endStr, events, existingEvent]);
+
   const handleSubmit = useCallback(async () => {
     if (!summary.trim() || !calendarId) return;
     setSaving(true);
@@ -652,6 +675,7 @@ export function EventFormModal({
       const payload = buildPayload();
       let uid: string;
       let savedEvent: CalendarEvent;
+      let newUid: string | undefined;
 
       if (isEdit) {
         const result = await updateEvent(existingEvent!.uid, {
@@ -665,6 +689,7 @@ export function EventFormModal({
             : {}),
         });
         uid = result.uid;
+        newUid = result.new_uid;
         savedEvent = {
           ...existingEvent!,
           ...payload,
@@ -690,7 +715,7 @@ export function EventFormModal({
       }
 
       showToast(isEdit ? "Termin gespeichert" : "Termin erstellt", "success");
-      onSaved(uid, savedEvent, isEdit ? editScope ?? undefined : undefined);
+      onSaved(uid, savedEvent, isEdit ? editScope ?? undefined : undefined, newUid);
       onClose();
     } catch (err) {
       const writeErr = err as WriteError;
@@ -824,6 +849,11 @@ export function EventFormModal({
               />
             </div>
           </div>
+          {overlap && (
+            <p className="form-hint">
+              Kollidiert mit: {overlap.summary}, {overlap.time}
+            </p>
+          )}
         </div>
 
         {/* Wiederholung */}

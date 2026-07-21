@@ -64,6 +64,19 @@ export interface MoveEventPayload {
   recurrence_id?: string | null;
 }
 
+export interface ResizeEventPayload {
+  mode: MoveMode;
+  etag: string;
+  occurrence_start: string;
+  new_end: string;
+  recurrence_id?: string | null;
+}
+
+export interface RestoreOccurrencePayload {
+  etag: string;
+  recurrence_id: string;
+}
+
 export type WriteError =
   | { type: 'conflict' }
   | { type: 'not_found' }
