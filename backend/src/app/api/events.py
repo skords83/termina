@@ -815,6 +815,7 @@ def post_resize(
                 )
                 .first()
             )
+            occ_naive = body.occurrence_start.replace(tzinfo=None)
             new_end_naive = body.new_end.replace(tzinfo=None)
             if existing_ov is not None:
                 existing_ov.end = new_end_naive
@@ -822,7 +823,7 @@ def post_resize(
                 db.add(EventOverride(
                     master_uid=uid,
                     recurrence_id=rid_naive,
-                    start=rid_naive,
+                    start=occ_naive,
                     end=new_end_naive,
                 ))
             db.commit()
