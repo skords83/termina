@@ -1,4 +1,5 @@
 import logging
+import threading
 import zoneinfo
 from datetime import date, datetime, timezone
 from typing import Any
@@ -17,6 +18,16 @@ from app.db.models import Calendar, Event, EventOverride
 from app.db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
+
+# run_sync() vergleicht den kompletten Remote-Zustand (PROPFIND) mit der
+# lokalen DB und löscht alles, was dabei nicht "gesehen" wurde. Wird
+# run_sync() parallel aus mehreren Threads aufgerufen (Scheduler-Tick +
+# Post-Write-BackgroundTask überschneiden sich leicht, da Schreibvorgänge
+# NICHT direkt in die lokale DB schreiben, sondern erst per Sync ankommen),
+# kann ein Lauf den frisch von einem anderen Lauf eingetragenen Termin als
+# "nicht mehr remote vorhanden" fehlinterpretieren und löschen — der Termin
+# verschwindet dann kommentarlos. Der Lock serialisiert alle Sync-Läufe.
+_sync_lock = threading.Lock()
 
 BERLIN = zoneinfo.ZoneInfo("Europe/Berlin")
 
@@ -914,6 +925,11 @@ def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
 
 def run_sync() -> None:
     """Entry point called by APScheduler."""
+    with _sync_lock:
+        _run_sync_locked()
+
+
+def _run_sync_locked() -> None:
     from app.config import settings
 
     logger.info("Starting CalDAV sync run")
