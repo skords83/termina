@@ -43,6 +43,8 @@ export interface UpdateEventPayload {
   recurrence_id?: string | null;
   /** Nur bei Serientermin: explizite Bearbeitungs-Reichweite */
   mode?: 'single' | 'future' | 'all';
+  /** Nur gesetzt, wenn der Termin in einen anderen Kalender verschoben wird (nur nicht-wiederkehrende Termine) */
+  calendar_id?: string;
 }
 
 export interface DeleteEventPayload {

@@ -404,6 +404,58 @@ def delete_event(calendar_id: str, uid: str, etag: str | None) -> None:
         raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
 
 
+def move_event_calendar(
+    old_calendar_id: str,
+    new_calendar_id: str,
+    uid: str,
+    etag: str | None,
+    summary: str,
+    start: datetime,
+    end: datetime,
+    all_day: bool = False,
+    location: str | None = None,
+    description: str | None = None,
+) -> None:
+    """Verschiebt ein nicht-wiederkehrendes Event in einen anderen Kalender.
+
+    CalDAV-Kalender sind eigene WebDAV-Collections – ein Event lässt sich nicht
+    per PUT "umhängen", sondern muss im Ziel-Kalender neu angelegt und im
+    Quell-Kalender gelöscht werden (UID bleibt erhalten). Bewusst create-vor-
+    delete: schlägt das Löschen fehl, bleibt der Termin (dupliziert) erhalten
+    statt komplett verloren zu gehen.
+    """
+    try:
+        client = _get_client()
+        old_cal = _find_caldav_calendar(client, old_calendar_id)
+        if old_cal is None:
+            raise ValueError(f"Kalender nicht gefunden: {old_calendar_id}")
+        new_cal = _find_caldav_calendar(client, new_calendar_id)
+        if new_cal is None:
+            raise ValueError(f"Kalender nicht gefunden: {new_calendar_id}")
+
+        old_obj = _find_caldav_event(old_cal, uid)
+        if old_obj is None:
+            raise ValueError(f"Event nicht gefunden: {uid}")
+
+        current_etag = _get_etag(old_obj)
+        if current_etag and etag and current_etag != etag:
+            raise ConflictError(f"ETag-Konflikt für Event {uid}")
+
+        ical_data = _make_ical(uid, summary, start, end, all_day, location, description, rrule=None)
+
+        _caldav_op_with_retry(
+            lambda: new_cal.save_event(ical_data),
+            context=f"move_event_calendar:create({uid})",
+        )
+        _caldav_op_with_retry(old_obj.delete, context=f"move_event_calendar:delete({uid})")
+    except (ValueError, ConflictError):
+        raise
+    except CalDAVTimeoutError:
+        raise
+    except Exception as e:
+        raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
+
+
 def delete_occurrence(
     calendar_id: str,
     uid: str,

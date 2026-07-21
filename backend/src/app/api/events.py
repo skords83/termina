@@ -37,6 +37,7 @@ from app.caldav.write import (
     delete_occurrence,
     delete_future_occurrences,
     move_event,
+    move_event_calendar,
     ConflictError,
     CalDAVTimeoutError,
 )
@@ -76,6 +77,9 @@ class EventUpdate(BaseModel):
     location: str | None = None
     description: str | None = None
     rrule: str | None = None
+    # Nur gesetzt, wenn der Termin in einen anderen Kalender verschoben wird.
+    # Nur für nicht-wiederkehrende Termine unterstützt (siehe put_event).
+    calendar_id: str | None = None
     # Bei Serien-Edit mit scope="single": recurrence_id der zu ändernden Instanz.
     # Das Backend legt dann einen EventOverride an statt den Master zu ändern.
     recurrence_id: datetime | None = None
@@ -536,6 +540,45 @@ def put_event(
         return {"uid": uid}
 
     # ── Scope: Alle Termine der Serie (oder normaler Termin) ──────────────────
+
+    # Kalenderwechsel: CalDAV-Kalender sind eigene Collections, ein Event kann
+    # nicht per PUT "umgehängt" werden. Nur für nicht-wiederkehrende Termine
+    # unterstützt (siehe Rückfrage an Nutzer) – bei Serien wäre unklar, wie
+    # Overrides/Instanzen mitwandern sollen.
+    if body.calendar_id and body.calendar_id != event.calendar_id:
+        if event.rrule:
+            raise HTTPException(
+                status_code=400,
+                detail="Kalenderwechsel wird für wiederkehrende Termine nicht unterstützt",
+            )
+        service.ensure_calendar_access(db, user, body.calendar_id)
+
+        try:
+            move_event_calendar(
+                old_calendar_id=event.calendar_id,
+                new_calendar_id=body.calendar_id,
+                uid=uid,
+                etag=body.etag,
+                summary=body.summary,
+                start=start_dt,
+                end=end_dt,
+                all_day=body.all_day,
+                location=body.location,
+                description=body.description,
+            )
+        except ConflictError:
+            raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except CalDAVTimeoutError as e:
+            raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
+
+        event.calendar_id = body.calendar_id
+        db.commit()
+
+        background.add_task(run_sync)
+        return {"uid": uid}
+
     try:
         update_event(
             calendar_id=event.calendar_id,

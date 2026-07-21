@@ -776,6 +776,17 @@
   color: var(--text-2);
 }
 
+.form-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .form-input,
 .form-textarea,
 .form-select {

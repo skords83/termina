@@ -751,25 +751,27 @@ export function EventFormModal({
         </div>
 
         {/* Kalender */}
-        {!isEdit && (
-          <div className="form-field">
-            <label className="form-label" htmlFor="event-calendar">
-              Kalender
-            </label>
-            <select
-              id="event-calendar"
-              className="form-select"
-              value={calendarId}
-              onChange={(e) => setCalendarId(e.target.value)}
-            >
-              {calendars.map((cal) => (
-                <option key={cal.id} value={cal.id}>
-                  {cal.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div className="form-field">
+          <label className="form-label" htmlFor="event-calendar">
+            Kalender
+          </label>
+          <select
+            id="event-calendar"
+            className="form-select"
+            value={calendarId}
+            disabled={isEdit && existingEvent?.is_recurring}
+            onChange={(e) => setCalendarId(e.target.value)}
+          >
+            {calendars.map((cal) => (
+              <option key={cal.id} value={cal.id}>
+                {cal.name}
+              </option>
+            ))}
+          </select>
+          {isEdit && existingEvent?.is_recurring && (
+            <p className="form-hint">Wiederkehrende Termine können den Kalender nicht wechseln.</p>
+          )}
+        </div>
 
         {/* Datum/Zeit-Sektion */}
         <div className="form-section">

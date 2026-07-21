@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CalendarEvent, Calendar } from '../types';
 
@@ -275,6 +275,36 @@ export function MonthView({
     return result;
   }, [cells]);
 
+  // Wie viele Termine passen tatsächlich in eine Tageszelle, bevor der
+  // Browser sie per `overflow: hidden` kommentarlos abschneidet? Die
+  // Zeilenhöhe schwankt (5 vs. 6 Wochen im Monat, Fensterhöhe), darum wird
+  // hier live gemessen statt eine feste Zahl anzunehmen — sonst weicht die
+  // "+X weitere"-Anzeige von dem ab, was tatsächlich sichtbar ist.
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [maxFit, setMaxFit] = useState(6);
+
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+
+    function recompute() {
+      const list = grid!.querySelector<HTMLElement>('.event-list');
+      if (!list) return;
+      const available = list.clientHeight;
+      const item = list.querySelector<HTMLElement>('.event-item, .event-more');
+      const itemHeight = item ? item.getBoundingClientRect().height : 19;
+      const gap = 3; // muss mit `.event-list { gap: 3px }` in calendar.css übereinstimmen
+      const slot = itemHeight + gap;
+      if (slot <= 0 || available <= 0) return;
+      setMaxFit(Math.max(1, Math.floor((available + gap) / slot)));
+    }
+
+    recompute();
+    const observer = new ResizeObserver(recompute);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [weeks]);
+
   return (
     <div className="month-view">
       <div className="month-header">
@@ -286,7 +316,7 @@ export function MonthView({
         ))}
       </div>
 
-      <div className="month-grid">
+      <div className="month-grid" ref={gridRef}>
         {weeks.map((week, wi) => {
           const kw = getISOWeek(week[0].date);
           const weekStart = week[0].date;
@@ -301,6 +331,10 @@ export function MonthView({
               {week.map(({ date, current }, i) => {
           const key = localDateStr(date);
           const dayEvents = eventsByDate.get(key) ?? [];
+          const overflow = dayEvents.length > maxFit;
+          // Bei Überlauf eine Zeile für den "+X weitere"-Link freihalten,
+          // sonst würde der Link selbst wieder abgeschnitten.
+          const visibleCount = overflow ? Math.max(1, maxFit - 1) : dayEvents.length;
 
           return (
             <DroppableDayCell
@@ -313,7 +347,7 @@ export function MonthView({
               onDayOpen={onDayOpen}
             >
               <div className="event-list">
-                {dayEvents.slice(0, 6).map(({ ev, isStart, isEnd, isMultiDay }) => {
+                {dayEvents.slice(0, visibleCount).map(({ ev, isStart, isEnd, isMultiDay }) => {
                   const cal = calendarMap.get(ev.calendar_id);
                   const color = cal?.color ?? '#888';
                   return (
@@ -329,7 +363,7 @@ export function MonthView({
                     />
                   );
                 })}
-                {dayEvents.length > 6 && (
+                {overflow && (
                   <div
                     className="event-more event-more--clickable"
                     onClick={(e) => {
@@ -337,7 +371,7 @@ export function MonthView({
                       onMoreClick?.(key);
                     }}
                   >
-                    +{dayEvents.length - 6} weitere
+                    +{dayEvents.length - visibleCount} weitere
                   </div>
                 )}
               </div>

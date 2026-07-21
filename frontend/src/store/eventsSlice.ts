@@ -19,16 +19,25 @@ import { useEffect } from 'react';
 import { create } from 'zustand';
 import type { CalendarEvent } from '../types';
 
+// Schlüssel für eine einzelne Instanz einer wiederkehrenden Serie.
+const occurrenceKey = (uid: string, recurrenceId: string) => `${uid}::${recurrenceId}`;
+
 interface OptimisticState {
   added: CalendarEvent[];
   deleted: Set<string>;
+  deletedOccurrences: Set<string>;
   updated: Map<string, CalendarEvent>;
 
   addOptimistic: (event: CalendarEvent) => void;
   updateOptimistic: (event: CalendarEvent) => void;
-  deleteOptimistic: (uid: string) => void;
+  // Ohne recurrenceId: löscht die ganze Serie/das ganze Event (Key = uid).
+  // Mit recurrenceId: löscht nur diese eine Instanz (Key = uid::recurrenceId),
+  // damit z.B. "nur diesen Termin löschen" bei Wiederholungen nicht die
+  // gesamte Serie aus der Ansicht entfernt.
+  deleteOptimistic: (uid: string, recurrenceId?: string | null) => void;
   rollbackAdd: (uid: string) => void;
   rollbackDelete: (uid: string) => void;
+  rollbackDeleteOccurrence: (key: string) => void;
   rollbackUpdate: (uid: string) => void;
   clearAll: () => void;
 }
@@ -36,6 +45,7 @@ interface OptimisticState {
 export const useOptimisticStore = create<OptimisticState>((set) => ({
   added: [],
   deleted: new Set(),
+  deletedOccurrences: new Set(),
   updated: new Map(),
 
   addOptimistic: (event) =>
@@ -48,8 +58,12 @@ export const useOptimisticStore = create<OptimisticState>((set) => ({
       return { updated };
     }),
 
-  deleteOptimistic: (uid) =>
-    set((s) => ({ deleted: new Set([...s.deleted, uid]) })),
+  deleteOptimistic: (uid, recurrenceId) =>
+    set((s) =>
+      recurrenceId
+        ? { deletedOccurrences: new Set([...s.deletedOccurrences, occurrenceKey(uid, recurrenceId)]) }
+        : { deleted: new Set([...s.deleted, uid]) }
+    ),
 
   rollbackAdd: (uid) =>
     set((s) => ({ added: s.added.filter((e) => e.uid !== uid) })),
@@ -61,6 +75,13 @@ export const useOptimisticStore = create<OptimisticState>((set) => ({
       return { deleted };
     }),
 
+  rollbackDeleteOccurrence: (key) =>
+    set((s) => {
+      const deletedOccurrences = new Set(s.deletedOccurrences);
+      deletedOccurrences.delete(key);
+      return { deletedOccurrences };
+    }),
+
   rollbackUpdate: (uid) =>
     set((s) => {
       const updated = new Map(s.updated);
@@ -69,7 +90,7 @@ export const useOptimisticStore = create<OptimisticState>((set) => ({
     }),
 
   clearAll: () =>
-    set({ added: [], deleted: new Set(), updated: new Map() }),
+    set({ added: [], deleted: new Set(), deletedOccurrences: new Set(), updated: new Map() }),
 }));
 
 // ── Hook: Server-Events mit Optimistic-Overrides mergen ──────────────────────
@@ -85,9 +106,11 @@ export function useMergedEvents(serverEvents: CalendarEvent[]): CalendarEvent[] 
   // Einzelselektoren → minimale Rerenders
   const added = useOptimisticStore((s) => s.added);
   const deleted = useOptimisticStore((s) => s.deleted);
+  const deletedOccurrences = useOptimisticStore((s) => s.deletedOccurrences);
   const updated = useOptimisticStore((s) => s.updated);
   const rollbackAdd = useOptimisticStore((s) => s.rollbackAdd);
   const rollbackDelete = useOptimisticStore((s) => s.rollbackDelete);
+  const rollbackDeleteOccurrence = useOptimisticStore((s) => s.rollbackDeleteOccurrence);
   const rollbackUpdate = useOptimisticStore((s) => s.rollbackUpdate);
 
   useEffect(() => {
@@ -103,6 +126,15 @@ export function useMergedEvents(serverEvents: CalendarEvent[]): CalendarEvent[] 
     deleted.forEach((uid) => {
       if (!serverEvents.some((s) => s.uid === uid)) {
         rollbackDelete(uid);
+      }
+    });
+
+    // DELETE (einzelne Instanz einer Wiederholung): Server liefert diese
+    // Instanz nicht mehr → Override weg.
+    deletedOccurrences.forEach((key) => {
+      const stillOnServer = serverEvents.some((s) => s.recurrence_id && occurrenceKey(s.uid, s.recurrence_id) === key);
+      if (!stillOnServer) {
+        rollbackDeleteOccurrence(key);
       }
     });
 
@@ -126,6 +158,7 @@ export function useMergedEvents(serverEvents: CalendarEvent[]): CalendarEvent[] 
     // Server-Events, gefiltert (DELETE) und gemergt (UPDATE)
     ...serverEvents
       .filter((e) => !deleted.has(e.uid))
+      .filter((e) => !(e.recurrence_id && deletedOccurrences.has(occurrenceKey(e.uid, e.recurrence_id))))
       .map((e) => updated.get(e.uid) ?? e),
   ];
 }

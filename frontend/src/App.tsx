@@ -759,6 +759,7 @@ export default function App() {
             onCopy={(ev) => { clipboardEventRef.current = ev; }}
             onDeleted={(uid, recurrenceId) => {
               if (recurrenceId) {
+                optimistic.deleteOptimistic(uid, recurrenceId);
                 setRefreshNonce((n) => n + 1);
               } else {
                 if (selectedEvent && !selectedEvent.is_recurring) {
