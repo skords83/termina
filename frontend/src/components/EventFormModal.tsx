@@ -53,28 +53,40 @@ const FREQ_LABELS: Record<RecurFreq, string> = {
 function parseRrule(rrule: string | null | undefined): {
   freq: RecurFreq;
   until: string;
+  count: string;
   extraParts: string;
 } {
-  if (!rrule) return { freq: "none", until: "", extraParts: "" };
+  if (!rrule) return { freq: "none", until: "", count: "", extraParts: "" };
   const freqMatch = rrule.match(/FREQ=([A-Z]+)/);
   const untilMatch = rrule.match(/UNTIL=(\d{8}(?:T\d{6}Z?)?)/);
+  const countMatch = rrule.match(/COUNT=(\d+)/);
   const freq = (freqMatch?.[1] ?? "none") as RecurFreq;
   const rawUntil = untilMatch?.[1] ?? "";
   const until = rawUntil
     ? `${rawUntil.slice(0, 4)}-${rawUntil.slice(4, 6)}-${rawUntil.slice(6, 8)}`
     : "";
+  const count = countMatch?.[1] ?? "";
   const extraParts = rrule
     .split(";")
-    .filter((p) => !p.startsWith("FREQ=") && !p.startsWith("UNTIL="))
+    .filter(
+      (p) => !p.startsWith("FREQ=") && !p.startsWith("UNTIL=") && !p.startsWith("COUNT=")
+    )
     .join(";");
-  return { freq, until, extraParts };
+  return { freq, until, count, extraParts };
 }
 
-function buildRrule(freq: RecurFreq, until: string, extraParts: string): string | null {
+function buildRrule(
+  freq: RecurFreq,
+  until: string,
+  count: string,
+  extraParts: string
+): string | null {
   if (freq === "none") return null;
   let s = `FREQ=${freq}`;
   if (extraParts) s += `;${extraParts}`;
-  if (until) {
+  if (count) {
+    s += `;COUNT=${count}`;
+  } else if (until) {
     const compact = until.replace(/-/g, "");
     s += `;UNTIL=${compact}T235959Z`;
   }
@@ -578,6 +590,10 @@ export function EventFormModal({
   const initialRrule = parseRrule(existingEvent?.rrule);
   const [recurFreq, setRecurFreq] = useState<RecurFreq>(initialRrule.freq);
   const [recurUntil, setRecurUntil] = useState(initialRrule.until);
+  const [recurCount, setRecurCount] = useState(initialRrule.count);
+  const [recurEndMode, setRecurEndMode] = useState<"never" | "until" | "count">(
+    initialRrule.count ? "count" : initialRrule.until ? "until" : "never"
+  );
   const [recurExtraParts, setRecurExtraParts] = useState(initialRrule.extraParts);
 
   const summaryRef = useRef<HTMLInputElement>(null);
@@ -626,7 +642,7 @@ export function EventFormModal({
     all_day: allDay,
     location: location.trim() || null,
     description: description.trim() || null,
-    rrule: buildRrule(recurFreq, recurUntil, recurExtraParts),
+    rrule: buildRrule(recurFreq, recurUntil, recurCount, recurExtraParts),
   });
 
   const handleSubmit = useCallback(async () => {
@@ -823,7 +839,11 @@ export function EventFormModal({
               value={recurFreq}
               onChange={(e) => {
                 setRecurFreq(e.target.value as RecurFreq);
-                if (e.target.value === "none") setRecurUntil("");
+                if (e.target.value === "none") {
+                  setRecurUntil("");
+                  setRecurCount("");
+                  setRecurEndMode("never");
+                }
                 setRecurExtraParts("");
               }}
               disabled={editScope === "single" || editScope === "future"}
@@ -838,11 +858,50 @@ export function EventFormModal({
 
           {recurFreq !== "none" && (
             <div className="form-field">
-              <label className="form-sublabel">Endet am (optional)</label>
+              <label className="form-sublabel" htmlFor="event-recur-end-mode">
+                Ende
+              </label>
+              <select
+                id="event-recur-end-mode"
+                className="form-select"
+                value={recurEndMode}
+                onChange={(e) => {
+                  const mode = e.target.value as "never" | "until" | "count";
+                  setRecurEndMode(mode);
+                  if (mode !== "until") setRecurUntil("");
+                  if (mode !== "count") setRecurCount("");
+                }}
+                disabled={editScope === "single" || editScope === "future"}
+              >
+                <option value="never">Kein Enddatum</option>
+                <option value="until">Endet am</option>
+                <option value="count">Nach Anzahl Wiederholungen</option>
+              </select>
+            </div>
+          )}
+
+          {recurFreq !== "none" && recurEndMode === "until" && (
+            <div className="form-field">
               <DatePicker
                 value={recurUntil}
                 min={startStr.slice(0, 10)}
                 onChange={setRecurUntil}
+                disabled={editScope === "single" || editScope === "future"}
+              />
+            </div>
+          )}
+
+          {recurFreq !== "none" && recurEndMode === "count" && (
+            <div className="form-field">
+              <input
+                type="number"
+                min={1}
+                step={1}
+                className="form-input"
+                placeholder="Anzahl Wiederholungen"
+                aria-label="Anzahl Wiederholungen"
+                value={recurCount}
+                onChange={(e) => setRecurCount(e.target.value)}
                 disabled={editScope === "single" || editScope === "future"}
               />
             </div>
