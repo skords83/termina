@@ -96,9 +96,17 @@ def _dt_equal(a, b) -> bool:
 
     def _norm(x):
         if isinstance(x, datetime):
-            return x.replace(tzinfo=None)
+            # Naive Datetimes stammen aus der DB (Europe/Berlin-Wandzeit), aware
+            # Datetimes aus dem ICS (dort immer UTC, siehe _to_utc). Beide müssen
+            # auf denselben Zeitpunkt normalisiert werden, bevor man sie vergleicht —
+            # sonst bleibt z.B. ein RECURRENCE-ID-Vergleich zwischen einer UTC-Zeit
+            # aus dem ICS und der naiven Berlin-Zeit aus der DB immer False (Differenz
+            # = Zeitzonen-Offset), selbst wenn beide denselben Vorkommen meinen.
+            if x.tzinfo is None:
+                x = x.replace(tzinfo=BERLIN)
+            return x.astimezone(timezone.utc)
         if isinstance(x, date_cls):
-            return datetime(x.year, x.month, x.day)
+            return datetime(x.year, x.month, x.day, tzinfo=BERLIN).astimezone(timezone.utc)
         return x
 
     return _norm(a) == _norm(b)
