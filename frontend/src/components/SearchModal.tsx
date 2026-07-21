@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { CalendarEvent, Calendar } from "../types/index";
 import { apiFetch, ApiError } from "../hooks/api";
+import { useOptimisticStore } from "../store/eventsSlice";
 
 interface SearchModalProps {
   calendars: Calendar[];
@@ -56,6 +57,16 @@ function descriptionSnippet(text: string, query: string): string | null {
 
 const DEBOUNCE_MS = 250;
 
+// Backend-Suche greift auf die lokale DB zu, die frisch angelegte Termine
+// erst nach dem naechsten Background-Sync enthaelt (siehe eventsSlice.ts).
+// Bis dahin matchen wir zusaetzlich clientseitig gegen den Optimistic-Store,
+// damit ein gerade erstellter Termin sofort auffindbar ist.
+function textMatches(ev: CalendarEvent, needleLower: string): boolean {
+  return [ev.summary, ev.location, ev.description].some(
+    (v) => v && v.toLowerCase().includes(needleLower)
+  );
+}
+
 export default function SearchModal({
   calendars,
   onClose,
@@ -68,6 +79,25 @@ export default function SearchModal({
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const requestSeq = useRef(0);
+
+  const added = useOptimisticStore((s) => s.added);
+  const deleted = useOptimisticStore((s) => s.deleted);
+  const updated = useOptimisticStore((s) => s.updated);
+
+  const mergedResults = useMemo(() => {
+    const needleLower = query.trim().toLowerCase();
+    if (!needleLower) return [];
+    const fromServer = results
+      .filter((e) => !deleted.has(e.uid))
+      .map((e) => updated.get(e.uid) ?? e);
+    const localOnly = added.filter(
+      (e) =>
+        !fromServer.some((s) => s.uid === e.uid) &&
+        (!calendarFilter || e.calendar_id === calendarFilter) &&
+        textMatches(e, needleLower)
+    );
+    return [...localOnly, ...fromServer];
+  }, [results, added, deleted, updated, query, calendarFilter]);
 
   const calMap = useMemo(() => {
     const m: Record<string, Calendar> = {};
@@ -171,10 +201,10 @@ export default function SearchModal({
           {query.trim() !== "" && !loading && error && (
             <div className="search-placeholder">Suche fehlgeschlagen: {error}</div>
           )}
-          {query.trim() !== "" && !loading && !error && results.length === 0 && (
+          {query.trim() !== "" && !loading && !error && mergedResults.length === 0 && (
             <div className="search-placeholder">Keine Ergebnisse für „{query}"</div>
           )}
-          {!loading && !error && results.map((ev) => {
+          {!loading && !error && mergedResults.map((ev) => {
             const cal = calMap[ev.calendar_id];
             const color = cal?.color || "#888";
             return (
