@@ -25,6 +25,7 @@ interface CreateProps extends BaseProps {
   mode: "create";
   defaultDate?: string;
   defaultCalendarId?: string;
+  duplicateFrom?: CalendarEvent;
   event?: never;
 }
 
@@ -538,37 +539,39 @@ export function EventFormModal({
 
   const isEdit = props.mode === "edit";
   const existingEvent = isEdit ? props.event : undefined;
+  const duplicateFrom = props.mode === "create" ? props.duplicateFrom : undefined;
+  const prefillEvent = existingEvent ?? duplicateFrom;
 
   const [editScope, setEditScope] = useState<EditScope | null>(
     isEdit && existingEvent?.is_recurring ? null : "all",
   );
 
-  const defaultStartStr = isEdit
-    ? existingEvent!.all_day
-      ? toLocalDateValue(existingEvent!.start)
-      : toLocalDatetimeValue(existingEvent!.start)
+  const defaultStartStr = prefillEvent
+    ? prefillEvent.all_day
+      ? toLocalDateValue(prefillEvent.start)
+      : toLocalDatetimeValue(prefillEvent.start)
     : makeDefaultStart(props.mode === "create" ? props.defaultDate : undefined);
 
-  const defaultEndStr = isEdit
-    ? existingEvent!.all_day
-      ? toLocalDateValue(existingEvent!.end, true)
-      : toLocalDatetimeValue(existingEvent!.end)
+  const defaultEndStr = prefillEvent
+    ? prefillEvent.all_day
+      ? toLocalDateValue(prefillEvent.end, true)
+      : toLocalDatetimeValue(prefillEvent.end)
     : addHour(defaultStartStr);
 
-  const defaultCalId = isEdit
-    ? existingEvent!.calendar_id
+  const defaultCalId = prefillEvent
+    ? prefillEvent.calendar_id
     : props.mode === "create" && props.defaultCalendarId
       ? props.defaultCalendarId
       : (calendars[0]?.id ?? "");
 
-  const [summary, setSummary] = useState(existingEvent?.summary ?? "");
+  const [summary, setSummary] = useState(prefillEvent?.summary ?? "");
   const [calendarId, setCalendarId] = useState(defaultCalId);
-  const [allDay, setAllDay] = useState(existingEvent?.all_day ?? false);
+  const [allDay, setAllDay] = useState(prefillEvent?.all_day ?? false);
   const [startStr, setStartStr] = useState(defaultStartStr);
   const [endStr, setEndStr] = useState(defaultEndStr);
-  const [location, setLocation] = useState(existingEvent?.location ?? "");
+  const [location, setLocation] = useState(prefillEvent?.location ?? "");
   const [description, setDescription] = useState(
-    existingEvent?.description ?? "",
+    prefillEvent?.description ?? "",
   );
   const [saving, setSaving] = useState(false);
 
@@ -718,7 +721,7 @@ export function EventFormModal({
         {/* Header */}
         <div className="form-modal-header">
           <h2 className="form-modal-title">
-            {isEdit ? "Termin bearbeiten" : "Neuer Termin"}
+            {isEdit ? "Termin bearbeiten" : duplicateFrom ? "Termin duplizieren" : "Neuer Termin"}
           </h2>
           <button
             className="form-modal-close"

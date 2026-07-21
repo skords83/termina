@@ -82,6 +82,20 @@ function parseLocalDate(iso: string): Date {
   return new Date(y, m - 1, d, h, min, s ?? 0);
 }
 
+function shiftEventToDate(event: CalendarEvent, targetDate: Date): CalendarEvent {
+  const origStartDay = parseLocalDate(event.start.slice(0, 10));
+  const targetDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  const deltaDays = Math.round((targetDay.getTime() - origStartDay.getTime()) / 86400000);
+
+  const shiftIso = (iso: string) => {
+    const d = parseLocalDate(iso);
+    d.setDate(d.getDate() + deltaDays);
+    return event.all_day ? toDateStr(d) : toIsoLocal(d);
+  };
+
+  return { ...event, start: shiftIso(event.start), end: shiftIso(event.end) };
+}
+
 function formatNavTitle(view: 'month' | 'week' | 'day' | 'agenda', current: Date): string {
   if (view === 'month') {
     return `${MONTHS[current.getMonth()]} ${current.getFullYear()}`;
@@ -133,6 +147,7 @@ export default function App() {
   const [anchorPos, setAnchorPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [editModal, setEditModal] = useState<CalendarEvent | null>(null);
   const [createModal, setCreateModal] = useState<{ defaultDate: string } | null>(null);
+  const [duplicateModal, setDuplicateModal] = useState<CalendarEvent | null>(null);
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
   const [showSearch, setShowSearch] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -192,6 +207,7 @@ export default function App() {
   viewRef.current = view;
   const currentDateRef = useRef(currentDate);
   currentDateRef.current = currentDate;
+  const clipboardEventRef = useRef<CalendarEvent | null>(null);
 
   useEffect(() => {
     const str = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-01`;
@@ -366,6 +382,14 @@ export default function App() {
           console.error(err);
           alert('Rückgängig/Wiederholen fehlgeschlagen.');
         });
+        return;
+      }
+
+      // ⌘V / Strg+V → kopierten Termin am fokussierten Tag einfügen (als Duplikat)
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') {
+        if (!clipboardEventRef.current) return;
+        e.preventDefault();
+        setDuplicateModal(shiftEventToDate(clipboardEventRef.current, currentDateRef.current));
         return;
       }
 
@@ -731,6 +755,8 @@ export default function App() {
             anchorPos={anchorPos}
             onClose={() => setSelectedEvent(null)}
             onEdit={(ev) => { setSelectedEvent(null); setEditModal(ev); }}
+            onDuplicate={(ev) => { setSelectedEvent(null); setDuplicateModal(ev); }}
+            onCopy={(ev) => { clipboardEventRef.current = ev; }}
             onDeleted={(uid, recurrenceId) => {
               if (recurrenceId) {
                 setRefreshNonce((n) => n + 1);
@@ -755,6 +781,27 @@ export default function App() {
             calendars={calendars}
             defaultDate={createModal.defaultDate}
             onClose={() => setCreateModal(null)}
+            onSaved={(_uid, ev) => {
+              if (!ev.is_recurring) {
+                useHistoryStore.getState().record({
+                  kind: 'create',
+                  uid: ev.uid,
+                  before: null,
+                  after: ev,
+                });
+              }
+              optimistic.addOptimistic(ev);
+              setRefreshNonce((n) => n + 1);
+            }}
+          />
+        )}
+
+        {duplicateModal && (
+          <EventFormModal
+            mode="create"
+            calendars={calendars}
+            duplicateFrom={duplicateModal}
+            onClose={() => setDuplicateModal(null)}
             onSaved={(_uid, ev) => {
               if (!ev.is_recurring) {
                 useHistoryStore.getState().record({

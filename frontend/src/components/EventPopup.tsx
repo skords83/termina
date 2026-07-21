@@ -27,6 +27,8 @@ interface Props {
   anchorPos: { x: number; y: number };
   onClose: () => void;
   onEdit: (event: CalendarEvent) => void;
+  onDuplicate: (event: CalendarEvent) => void;
+  onCopy: (event: CalendarEvent) => void;
   onDeleted: (uid: string, recurrenceId?: string | null) => void;
 }
 
@@ -117,7 +119,7 @@ const S = {
     background: "#1e1e1e",
     border: "1px solid #2e2e2e",
     borderRadius: "0.625rem",
-    width: "18rem",
+    width: "19.5rem",
     boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
     fontFamily: "DM Sans, sans-serif",
     color: "#e8e6e3",
@@ -277,6 +279,8 @@ export function EventPopup({
   anchorPos,
   onClose,
   onEdit,
+  onDuplicate,
+  onCopy,
   onDeleted,
 }: Props) {
   const { showToast } = useToast();
@@ -320,6 +324,19 @@ export function EventPopup({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  // ⌘C / Strg+C kopiert den Termin (Einfügen via ⌘V auf dem Kalender)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        onCopy(event);
+        showToast("Termin kopiert", "success");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [event, onCopy, showToast]);
 
   const executeDelete = useCallback(async (recurrenceId?: string | null, mode?: "single" | "future" | "all") => {
     setDeleting(true);
@@ -445,6 +462,17 @@ export function EventPopup({
                 }}
               >
                 ✎ Bearbeiten
+              </button>
+              <button
+                style={S.btnEdit}
+                onClick={() => {
+                  onClose();
+                  onDuplicate(event);
+                }}
+                title="Termin duplizieren"
+                aria-label="Termin duplizieren"
+              >
+                ⧉
               </button>
               <button
                 style={S.btnDelete}
