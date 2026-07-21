@@ -15,6 +15,8 @@
  *  19. Relative Zeiten (in 30 Minuten, in 2 Stunden)
  *  20. Zeitbereich ohne "von" (10 bis 12)
  *  21. Location mit Artikeln (in der Bibliothek)
+ *  22. Wiederholungen: "jeden/jede/jedes <Wochentag>", "täglich", "wöchentlich",
+ *      "alle X Wochen/Monate", "monatlich (am <Tag>)", "jährlich" → RRULE
  *
  * v2 Fixes:
  *  1. Unicode-aware Wortgrenzen (Umlaute brechen \b nicht mehr)
@@ -36,6 +38,7 @@ export interface ParsedEvent {
   end: string;
   all_day: boolean;
   location?: string;
+  rrule?: string;       // z.B. "FREQ=WEEKLY;BYDAY=MO"
 }
 
 // ─── Hilfsfunktionen ────────────────────────────────────────────────────────
@@ -605,6 +608,115 @@ function isAllDay(input: string): boolean {
   return /\bganztägig\b|\bganztagig\b|\bganz tag\b|\bganze tag\b/i.test(input);
 }
 
+// ─── Wiederholung erkennen (jeden Montag, alle 2 Wochen, monatlich, …) ─────
+
+interface RecurrenceResult {
+  rrule: string;
+  consumed: string;
+}
+
+const ICS_BYDAY = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+
+const NUM_WORDS: Record<string, number> = {
+  zwei: 2, drei: 3, vier: 4, fünf: 5, funf: 5,
+  sechs: 6, sieben: 7, acht: 8, neun: 9, zehn: 10,
+};
+
+function parseIntervalWord(raw: string): number {
+  return /^\d+$/.test(raw) ? parseInt(raw) : NUM_WORDS[raw] ?? 1;
+}
+
+function resolveRecurrence(input: string): RecurrenceResult | null {
+  const lower = input.toLowerCase();
+
+  // ── "jeden/jede/jedes <Wochentag>" ──
+  const weekdayRe = new RegExp(
+    `\\b(?:jeden|jede|jedes)\\s+(${WEEKDAY_ALL})${NLA}`
+  );
+  const weekdayM = lower.match(weekdayRe);
+  if (weekdayM) {
+    const target = WEEKDAY_MAP[weekdayM[1]];
+    if (target !== undefined) {
+      return { rrule: `FREQ=WEEKLY;BYDAY=${ICS_BYDAY[target]}`, consumed: weekdayM[0] };
+    }
+  }
+
+  // ── "täglich" / "jeden tag" ──
+  const daily = lower.match(/\b(?:täglich|jeden tag)\b/);
+  if (daily) {
+    return { rrule: "FREQ=DAILY", consumed: daily[0] };
+  }
+
+  // ── "alle X Wochen" (Ziffer oder Zahlwort) ──
+  const everyWeeksM = lower.match(/\balle\s+(\d+|zwei|drei|vier|fünf|funf|sechs|sieben|acht|neun|zehn)\s+wochen?\b/);
+  if (everyWeeksM) {
+    const n = parseIntervalWord(everyWeeksM[1]);
+    return { rrule: `FREQ=WEEKLY;INTERVAL=${n}`, consumed: everyWeeksM[0] };
+  }
+
+  // ── "wöchentlich" ──
+  const weekly = lower.match(/\bwöchentlich\b/);
+  if (weekly) {
+    return { rrule: "FREQ=WEEKLY", consumed: weekly[0] };
+  }
+
+  // ── "monatlich am <Tag>" ──
+  const monthlyOnDay = lower.match(/\bmonatlich\s+am\s+(\d{1,2})\.?\b/);
+  if (monthlyOnDay) {
+    const day = parseInt(monthlyOnDay[1]);
+    if (day >= 1 && day <= 31) {
+      return { rrule: `FREQ=MONTHLY;BYMONTHDAY=${day}`, consumed: monthlyOnDay[0] };
+    }
+  }
+
+  // ── "alle X Monate" ──
+  const everyMonthsM = lower.match(/\balle\s+(\d+|zwei|drei|vier|fünf|funf|sechs|sieben|acht|neun|zehn)\s+monate?n?\b/);
+  if (everyMonthsM) {
+    const n = parseIntervalWord(everyMonthsM[1]);
+    return { rrule: `FREQ=MONTHLY;INTERVAL=${n}`, consumed: everyMonthsM[0] };
+  }
+
+  // ── "monatlich" (ohne Tagesangabe) ──
+  const monthly = lower.match(/\bmonatlich\b/);
+  if (monthly) {
+    return { rrule: "FREQ=MONTHLY", consumed: monthly[0] };
+  }
+
+  // ── "jährlich" ──
+  const yearly = lower.match(/\bjährlich\b/);
+  if (yearly) {
+    return { rrule: "FREQ=YEARLY", consumed: yearly[0] };
+  }
+
+  return null;
+}
+
+const BYDAY_LABELS: Record<string, string> = {
+  MO: "Montag", TU: "Dienstag", WE: "Mittwoch", TH: "Donnerstag",
+  FR: "Freitag", SA: "Samstag", SU: "Sonntag",
+};
+
+// Menschenlesbare Beschreibung eines RRULE-Strings für die Vorschau vor dem Speichern.
+export function describeRrule(rrule: string): string {
+  const freqMatch = rrule.match(/FREQ=([A-Z]+)/);
+  const freq = freqMatch?.[1];
+  const interval = parseInt(rrule.match(/INTERVAL=(\d+)/)?.[1] ?? "1");
+  const byday = rrule.match(/BYDAY=([A-Z]{2})/)?.[1];
+  const bymonthday = rrule.match(/BYMONTHDAY=(\d+)/)?.[1];
+
+  if (freq === "DAILY") return interval > 1 ? `Alle ${interval} Tage` : "Täglich";
+  if (freq === "WEEKLY") {
+    if (byday) return `Wöchentlich (jeden ${BYDAY_LABELS[byday] ?? byday})`;
+    return interval > 1 ? `Alle ${interval} Wochen` : "Wöchentlich";
+  }
+  if (freq === "MONTHLY") {
+    if (bymonthday) return `Monatlich (am ${bymonthday}.)`;
+    return interval > 1 ? `Alle ${interval} Monate` : "Monatlich";
+  }
+  if (freq === "YEARLY") return "Jährlich";
+  return rrule;
+}
+
 // ─── Zusammenfassung aus Rest-Text extrahieren ────────────────────────────────
 
 function extractSummary(input: string, consumed: string[]): string {
@@ -655,12 +767,15 @@ export function parseNaturalEvent(input: string): ParsedEvent | null {
   if (relTime) {
     consumed.push(relTime.consumed);
     const endDate = addHours(relTime.date, 1);
+    const recurrence = resolveRecurrence(input);
+    if (recurrence) consumed.push(recurrence.consumed);
     const summary = extractSummary(input, consumed);
     return {
       summary,
       start: dateToLocalISO(relTime.date),
       end: dateToLocalISO(endDate),
       all_day: false,
+      rrule: recurrence?.rrule,
     };
   }
 
@@ -727,7 +842,11 @@ export function parseNaturalEvent(input: string): ParsedEvent | null {
   // 5. Ort
   const location = resolveLocation(input);
 
-  // 6. Zusammenfassung (was übrig bleibt)
+  // 6. Wiederholung
+  const recurrence = resolveRecurrence(input);
+  if (recurrence) consumed.push(recurrence.consumed);
+
+  // 7. Zusammenfassung (was übrig bleibt)
   const summary = extractSummary(input, consumed);
 
   return {
@@ -736,5 +855,6 @@ export function parseNaturalEvent(input: string): ParsedEvent | null {
     end: dateToLocalISO(endDate, allDay),
     all_day: allDay,
     location,
+    rrule: recurrence?.rrule,
   };
 }

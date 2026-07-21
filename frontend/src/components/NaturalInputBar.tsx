@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { parseNaturalEvent, ParsedEvent } from "../utils/naturalParser";
+import { parseNaturalEvent, describeRrule, ParsedEvent } from "../utils/naturalParser";
 
 interface NaturalInputBarProps {
   calendars: { id: string; name: string; color: string }[];
@@ -136,6 +136,7 @@ function NaturalInputBar({
               {!parsed.all_day && <span> – {formatPreviewDate(parsed.end)}</span>}
               {parsed.all_day && <span> (Ganztägig)</span>}
               {parsed.location && <span> · 📍 {parsed.location}</span>}
+              {parsed.rrule && <span> · 🔁 {describeRrule(parsed.rrule)}</span>}
             </div>
           </div>
         ) : text.trim() ? (
@@ -148,6 +149,7 @@ function NaturalInputBar({
             <span className="natural-hint">„Am 24.06 von 10 bis 12 Hausarbeit"</span>
             <span className="natural-hint">„Freitag abends Kino"</span>
             <span className="natural-hint">„Nächste Woche Montag ab 9 Uhr Meeting 2 Stunden"</span>
+            <span className="natural-hint">„Jeden Montag 16 Uhr Fußball"</span>
           </div>
         )}
 

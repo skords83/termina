@@ -414,3 +414,79 @@ describe("user's original failing input", () => {
     expect(r!.all_day).toBe(false);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. Wiederholungen (RRULE)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("new: recurrence recognition", () => {
+  it("jeden Montag", () => {
+    // 2026-06-21 = Sunday → nächster Montag = 2026-06-22
+    const r = parseNaturalEvent("jeden Montag 16 Uhr Fußball");
+    expect(date(r)).toBe("2026-06-22");
+    expect(startTime(r)).toBe("16:00");
+    expect(r!.summary).toBe("Fußball");
+    expect(r!.rrule).toBe("FREQ=WEEKLY;BYDAY=MO");
+  });
+
+  it("jeden Freitag", () => {
+    const r = parseNaturalEvent("jeden Freitag Sport");
+    expect(r!.rrule).toBe("FREQ=WEEKLY;BYDAY=FR");
+    expect(r!.summary).toBe("Sport");
+  });
+
+  it("täglich", () => {
+    const r = parseNaturalEvent("täglich 7 Uhr Joggen");
+    expect(r!.rrule).toBe("FREQ=DAILY");
+    expect(r!.summary).toBe("Joggen");
+  });
+
+  it("jeden Tag", () => {
+    const r = parseNaturalEvent("jeden Tag Vitamine");
+    expect(r!.rrule).toBe("FREQ=DAILY");
+  });
+
+  it("wöchentlich", () => {
+    const r = parseNaturalEvent("wöchentlich Teammeeting");
+    expect(r!.rrule).toBe("FREQ=WEEKLY");
+    expect(r!.summary).toBe("Teammeeting");
+  });
+
+  it("alle zwei Wochen", () => {
+    const r = parseNaturalEvent("alle zwei Wochen Müllabfuhr");
+    expect(r!.rrule).toBe("FREQ=WEEKLY;INTERVAL=2");
+    expect(r!.summary).toBe("Müllabfuhr");
+  });
+
+  it("alle 3 Wochen", () => {
+    const r = parseNaturalEvent("alle 3 Wochen Gießen");
+    expect(r!.rrule).toBe("FREQ=WEEKLY;INTERVAL=3");
+  });
+
+  it("monatlich am 15", () => {
+    const r = parseNaturalEvent("monatlich am 15 Miete");
+    expect(r!.rrule).toBe("FREQ=MONTHLY;BYMONTHDAY=15");
+    expect(r!.summary).toBe("Miete");
+  });
+
+  it("monatlich (ohne Tag)", () => {
+    const r = parseNaturalEvent("monatlich Abrechnung");
+    expect(r!.rrule).toBe("FREQ=MONTHLY");
+  });
+
+  it("alle 3 Monate", () => {
+    const r = parseNaturalEvent("alle 3 Monate Kontrolle");
+    expect(r!.rrule).toBe("FREQ=MONTHLY;INTERVAL=3");
+  });
+
+  it("jährlich", () => {
+    const r = parseNaturalEvent("jährlich Hochzeitstag");
+    expect(r!.rrule).toBe("FREQ=YEARLY");
+    expect(r!.summary).toBe("Hochzeitstag");
+  });
+
+  it("no recurrence phrase leaves rrule undefined", () => {
+    const r = parseNaturalEvent("morgen 14 Uhr Meeting");
+    expect(r!.rrule).toBeUndefined();
+  });
+});

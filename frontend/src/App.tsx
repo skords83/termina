@@ -880,6 +880,7 @@ export default function App() {
                 end: parsed.end,
                 all_day: parsed.all_day,
                 location: parsed.location,
+                rrule: parsed.rrule,
               });
               const naturalEvent: CalendarEvent = {
                 uid,
@@ -891,6 +892,8 @@ export default function App() {
                 location: parsed.location ?? undefined,
                 etag: null,
                 description: null,
+                rrule: parsed.rrule ?? null,
+                is_recurring: !!parsed.rrule,
               };
               useHistoryStore.getState().record({
                 kind: 'create',
