@@ -70,10 +70,11 @@
 
 /* ─── Resize Handle ──────────────────────────────────────────── */
 
-.day-event,
-.week-event {
-  position: relative;
-}
+/* .day-event/.week-event sind bereits position: absolute (views.css) —
+   das reicht als Containing Block fuer den Resize-Handle. Ein zusaetzliches
+   "position: relative" hier wuerde das absolute Grid-Layout kaputt machen
+   (jeder Termin driftet dann um die kumulierte Hoehe aller vorherigen
+   Termine des Tages/der Woche nach unten, siehe Bug-Report "Pfaff"/"Umzug 1b"). */
 
 .day-event-resize-handle,
 .week-event-resize-handle {
