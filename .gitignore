@@ -15,6 +15,9 @@ venv/
 node_modules/
 dist/
 .vite/
+frontend/vite.config.js
+frontend/vite.config.d.ts
+*.tsbuildinfo
 
 # Daten
 data/*
