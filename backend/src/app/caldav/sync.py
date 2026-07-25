@@ -14,8 +14,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.caldav.client import get_caldav_client
+from app.db import session as db_session
 from app.db.models import Calendar, Event, EventOverride
-from app.db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -933,7 +933,7 @@ def _run_sync_locked() -> None:
     from app.config import settings
 
     logger.info("Starting CalDAV sync run")
-    db: Session = SessionLocal()
+    db: Session = db_session.SessionLocal()
     try:
         client = get_caldav_client()
 

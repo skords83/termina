@@ -147,7 +147,11 @@
       "Bash(sed -n '648,740p' /home/skords/Dokumente/Projekts/termina/frontend/src/utils/naturalParser.ts)",
       "Bash(awk NR==217,NR==226{print NR\": \"$0} *)",
       "Bash(npm install *)",
-      "Skill(run)"
+      "Skill(run)",
+      "Bash(.venv/bin/python -m pytest tests/test_phase1_sync.py -v)",
+      "Bash(.venv/bin/python -m pytest)",
+      "Bash(.venv/bin/python -m pytest tests/test_phase2_api.py::test_healthz)",
+      "Bash(.venv/bin/python -m pytest -q)"
     ]
   }
 }

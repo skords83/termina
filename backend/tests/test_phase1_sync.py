@@ -3,19 +3,23 @@
 Testet:
 - Tabellen-Erstellung
 - Calendar/Event upsert
-- _parse_ical mit einem minimalen VCALENDAR-String
+- _upsert_event mit einem minimalen VCALENDAR-String
 - Loeschlogik (Event verschwindet wenn ETag nicht mehr remote)
 """
 
-import pytest
+import zoneinfo
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+
+import pytest
+from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.models import Base, Calendar, Event
-from app.caldav.sync import _parse_ical, _apply_parsed, run_sync
+from app.caldav.sync import _upsert_event, run_sync
+
+BERLIN = zoneinfo.ZoneInfo("Europe/Berlin")
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +83,7 @@ def test_cascade_delete(in_memory_session):
 
 
 # ---------------------------------------------------------------------------
-# Parse-Tests
+# Parse-Tests (ueber _upsert_event, das Parsen + DB-Schreiben in einem macht)
 # ---------------------------------------------------------------------------
 
 MINIMAL_ICAL = """BEGIN:VCALENDAR
@@ -117,32 +121,82 @@ END:VEVENT
 END:VCALENDAR"""
 
 
-def test_parse_minimal_ical():
-    result = _parse_ical(MINIMAL_ICAL)
-    assert result is not None
-    assert result["uid"] == "test-uid-001@termina"
-    assert result["summary"] == "Testevent Sync"
-    assert result["all_day"] is False
-    assert result["start"] == datetime(2026, 6, 10, 10, 0, 0, tzinfo=UTC)
+def _upsert(session, cal_id, etag, raw, url):
+    seen_uids: set[str] = set()
+    _upsert_event(session, cal_id, etag, raw, url, {}, seen_uids)
+    session.commit()
+    return seen_uids
 
 
-def test_parse_allday_ical():
-    result = _parse_ical(ALLDAY_ICAL)
-    assert result is not None
-    assert result["all_day"] is True
-    assert result["start"].date().isoformat() == "2026-06-15"
+def test_parse_minimal_ical(in_memory_session):
+    cal = Calendar(id="https://nc.example.com/cal/personal/", name="Persoenlich")
+    in_memory_session.add(cal)
+    in_memory_session.commit()
+
+    seen_uids = _upsert(
+        in_memory_session, cal.id, "etag-1", MINIMAL_ICAL,
+        "https://nc.example.com/cal/personal/event1.ics",
+    )
+
+    assert "test-uid-001@termina" in seen_uids
+    ev = in_memory_session.get(Event, "test-uid-001@termina")
+    assert ev is not None
+    assert ev.summary == "Testevent Sync"
+    assert ev.all_day is False
+    expected_start = (
+        datetime(2026, 6, 10, 10, 0, 0, tzinfo=UTC).astimezone(BERLIN).replace(tzinfo=None)
+    )
+    assert ev.start == expected_start
 
 
-def test_parse_rrule():
-    result = _parse_ical(RRULE_ICAL)
-    assert result is not None
-    assert result["rrule"] is not None
-    assert "FREQ=WEEKLY" in result["rrule"]
+def test_parse_allday_ical(in_memory_session):
+    cal = Calendar(id="https://nc.example.com/cal/personal/", name="Persoenlich")
+    in_memory_session.add(cal)
+    in_memory_session.commit()
+
+    _upsert(
+        in_memory_session, cal.id, "etag-2", ALLDAY_ICAL,
+        "https://nc.example.com/cal/personal/event2.ics",
+    )
+
+    ev = in_memory_session.get(Event, "allday-001@termina")
+    assert ev is not None
+    assert ev.all_day is True
+    assert ev.start.date().isoformat() == "2026-06-15"
 
 
-def test_parse_invalid_returns_none():
-    assert _parse_ical("das ist kein ical") is None
-    assert _parse_ical("") is None
+def test_parse_rrule(in_memory_session):
+    cal = Calendar(id="https://nc.example.com/cal/personal/", name="Persoenlich")
+    in_memory_session.add(cal)
+    in_memory_session.commit()
+
+    _upsert(
+        in_memory_session, cal.id, "etag-3", RRULE_ICAL,
+        "https://nc.example.com/cal/personal/event3.ics",
+    )
+
+    ev = in_memory_session.get(Event, "rrule-001@termina")
+    assert ev is not None
+    assert ev.rrule is not None
+    assert "FREQ=WEEKLY" in ev.rrule
+
+
+def test_parse_invalid_is_noop(in_memory_session):
+    cal = Calendar(id="https://nc.example.com/cal/personal/", name="Persoenlich")
+    in_memory_session.add(cal)
+    in_memory_session.commit()
+
+    seen_uids = _upsert(
+        in_memory_session, cal.id, "etag-x", "das ist kein ical",
+        "https://nc.example.com/cal/personal/bad1.ics",
+    )
+    seen_uids |= _upsert(
+        in_memory_session, cal.id, "etag-y", "",
+        "https://nc.example.com/cal/personal/bad2.ics",
+    )
+
+    assert seen_uids == set()
+    assert in_memory_session.query(Event).count() == 0
 
 
 # ---------------------------------------------------------------------------
@@ -152,23 +206,27 @@ def test_parse_invalid_returns_none():
 def test_run_sync_creates_calendar_and_event(in_memory_session):
     """run_sync legt Kalender + Event in der DB an."""
 
-    from app.caldav.client import CalendarInfo
-
     mock_calendars = [
-        CalendarInfo(
-            url="https://nc.example.com/cal/personal/",
-            name="Persoenlich",
-            color="#4A90D9",
-            ctag="ctag-v1",
-        )
+        {
+            "url": "https://nc.example.com/cal/personal/",
+            "name": "Persoenlich",
+            "color": "#4A90D9",
+            "ctag": "ctag-v1",
+            "subscribed": False,
+            "source_url": None,
+        }
     ]
     mock_etags = {"https://nc.example.com/cal/personal/event1.ics": "etag-abc"}
+    mock_fetched = {
+        "https://nc.example.com/cal/personal/event1.ics": ("etag-abc", MINIMAL_ICAL)
+    }
 
     with (
-        patch("app.caldav.sync.discover_calendars", return_value=mock_calendars),
-        patch("app.caldav.sync.get_event_etags", return_value=mock_etags),
-        patch("app.caldav.sync.fetch_event_ical", return_value=MINIMAL_ICAL),
-        patch("app.caldav.sync.get_session", return_value=in_memory_session),
+        patch("app.caldav.sync.get_caldav_client", return_value=object()),
+        patch("app.caldav.sync._discover_calendars", return_value=mock_calendars),
+        patch("app.caldav.sync._propfind_etags", return_value=mock_etags),
+        patch("app.caldav.sync._multiget_ical", return_value=mock_fetched),
+        patch("app.caldav.sync.db_session.SessionLocal", return_value=in_memory_session),
     ):
         run_sync()
 

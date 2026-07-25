@@ -12,8 +12,8 @@ from app.auth.security import (
     verify_password,
 )
 from app.config import settings
+from app.db import session as db_session
 from app.db.models import User, UserCalendarAccess, UserSession
-from app.db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +141,7 @@ def bootstrap_initial_admin() -> None:
     if not settings.initial_admin_email or not settings.initial_admin_password:
         return
 
-    db = SessionLocal()
+    db = db_session.SessionLocal()
     try:
         if db.query(User).count() > 0:
             return
