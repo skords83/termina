@@ -321,6 +321,15 @@ def _text_matches(item: dict, needle: str) -> bool:
     return False
 
 
+def _parse_start_dt(item: dict) -> datetime:
+    start_str = item["start"]
+    return (
+        datetime.fromisoformat(start_str)
+        if "T" in start_str
+        else datetime.strptime(start_str, "%Y-%m-%d")
+    ).replace(tzinfo=None)
+
+
 @router.get("/events/search")
 def search_events(
     q: str = Query(min_length=1),
@@ -384,15 +393,21 @@ def search_events(
 
     for e in rrule_events:
         instances = expand_rrule_event(e, window_from, window_to, overrides_by_uid.get(e.uid, {}))
-        result.extend(item for item in instances if _text_matches(item, needle))
+        matches = [item for item in instances if _text_matches(item, needle)]
+        if not matches:
+            continue
+        # Eine Serie taucht sonst mit jedem Vorkommen im Suchfenster (bis zu
+        # 6 Jahre bei Geburtstagen) einzeln auf. Stattdessen nur das naechste
+        # anstehende Vorkommen zeigen, oder falls keins mehr ansteht das
+        # zuletzt vergangene.
+        upcoming = [item for item in matches if _parse_start_dt(item) >= now]
+        if upcoming:
+            result.append(min(upcoming, key=_parse_start_dt))
+        else:
+            result.append(max(matches, key=_parse_start_dt))
 
     def _sort_key(item: dict):
-        start_str = item["start"]
-        start_dt = (
-            datetime.fromisoformat(start_str)
-            if "T" in start_str
-            else datetime.strptime(start_str, "%Y-%m-%d")
-        ).replace(tzinfo=None)
+        start_dt = _parse_start_dt(item)
         if start_dt >= now:
             return (0, start_dt.timestamp())
         return (1, -start_dt.timestamp())

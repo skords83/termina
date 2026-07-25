@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from lxml import etree
@@ -313,7 +313,7 @@ def _sync_birthdays(db: Session, client: Any) -> None:
                 if existing:
                     existing.summary = summary
                     existing.start = start_dt
-                    existing.end = start_dt
+                    existing.end = start_dt + timedelta(days=1)
                     existing.all_day = True
                     existing.rrule = "FREQ=YEARLY"
                     existing.birth_year = contact["year"]
@@ -325,7 +325,7 @@ def _sync_birthdays(db: Session, client: Any) -> None:
                             etag=None,
                             summary=summary,
                             start=start_dt,
-                            end=start_dt,
+                            end=start_dt + timedelta(days=1),
                             all_day=True,
                             rrule="FREQ=YEARLY",
                             location=None,
