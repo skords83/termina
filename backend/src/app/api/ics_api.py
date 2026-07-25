@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from sqlalchemy.orm import Session
@@ -27,6 +28,17 @@ router = APIRouter()
 def _safe_filename(summary: str | None) -> str:
     base = re.sub(r"[^\w\-äöüÄÖÜß ]", "", summary or "").strip() or "termin"
     return base[:80]
+
+
+def _content_disposition(filename: str) -> str:
+    """RFC 6266 Content-Disposition-Header, auch fuer nicht-ASCII Dateinamen.
+
+    HTTP-Header-Werte muessen ASCII sein; Umlaute im filename-Parameter wuerden
+    sonst je nach Client/Server unterschiedlich (de)kodiert und den Header
+    zerstoeren. filename* traegt die UTF-8-Variante nach Spec.
+    """
+    ascii_fallback = filename.encode("ascii", "ignore").decode("ascii") or "termin.ics"
+    return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(filename)}"
 
 
 @router.get("/ics/export")
@@ -78,7 +90,7 @@ def export_ics_event(
     return Response(
         content=ics_bytes,
         media_type="text/calendar",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _content_disposition(filename)},
     )
 
 
