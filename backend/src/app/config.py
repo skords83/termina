@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
     ics_feeds: list[dict] = []
     calendar_colors: dict[str, str] = {}
+    sync_birthdays: bool = False
+    birthdays_calendar_color: str = "#f2a65a"
 
     # --- Auth ---
     initial_admin_email: str | None = None

@@ -42,6 +42,7 @@ class Event(Base):
     location: Mapped[str | None] = mapped_column(String, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_ical: Mapped[str | None] = mapped_column(Text, nullable=True)
+    birth_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     calendar: Mapped["Calendar"] = relationship("Calendar", back_populates="events")
     overrides: Mapped[list["EventOverride"]] = relationship(

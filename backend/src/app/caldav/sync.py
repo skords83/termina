@@ -969,13 +969,29 @@ def _run_sync_locked() -> None:
                 logger.error("Error syncing ICS feed %s: %s", feed.get("name"), exc)
                 db.rollback()
 
-        # Kalender entfernen die weder im CalDAV-Server noch in den ICS-Feeds vorhanden sind.
-        # Nur wenn Discovery erfolgreich war — sonst würden alle CalDAV-Kalender fälschlich
-        # als gelöscht gewertet.
+        # Geburtstage aus CardDAV-Adressbüchern (optional, gleicher Server/gleiche Credentials)
+        birthday_calendar_ids: set[str] = set()
+        if settings.sync_birthdays:
+            from app.caldav.carddav import BIRTHDAYS_CALENDAR_ID, _sync_birthdays
+
+            birthday_calendar_ids.add(BIRTHDAYS_CALENDAR_ID)
+            try:
+                _sync_birthdays(db, client)
+            except Exception as exc:
+                logger.error("Error syncing birthdays: %s", exc)
+                db.rollback()
+
+        # Kalender entfernen die weder im CalDAV-Server noch in den ICS-Feeds/Geburtstagen
+        # vorhanden sind. Nur wenn Discovery erfolgreich war — sonst würden alle
+        # CalDAV-Kalender fälschlich als gelöscht gewertet.
         if discovery_ok:
             existing_cals = db.query(Calendar).all()
             for db_cal in existing_cals:
-                if db_cal.id not in remote_urls and db_cal.id not in ics_feed_ids:
+                if (
+                    db_cal.id not in remote_urls
+                    and db_cal.id not in ics_feed_ids
+                    and db_cal.id not in birthday_calendar_ids
+                ):
                     logger.info("Removing deleted calendar: %s", db_cal.name)
                     db.query(Event).filter(Event.calendar_id == db_cal.id).delete()
                     db.delete(db_cal)

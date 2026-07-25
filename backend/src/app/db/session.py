@@ -29,6 +29,12 @@ _MIGRATIONS: list[tuple[str, str]] = [
     ),
 ]
 
+# SQLite kennt kein "ADD COLUMN IF NOT EXISTS" — hier per PRAGMA geprüft statt
+# über die obige rein deklarative Liste.
+_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
+    ("events", "birth_year", "ALTER TABLE events ADD COLUMN birth_year INTEGER"),
+]
+
 
 def create_tables() -> None:
     Base.metadata.create_all(bind=engine)
@@ -45,6 +51,13 @@ def apply_migrations() -> None:
         for name, ddl in _MIGRATIONS:
             conn.execute(text(ddl))
             logger.debug("Migration angewendet: %s", name)
+
+        for table, column, ddl in _COLUMN_MIGRATIONS:
+            existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+            if column not in existing:
+                conn.execute(text(ddl))
+                logger.info("Spalte hinzugefügt: %s.%s", table, column)
+
         conn.commit()
 
 

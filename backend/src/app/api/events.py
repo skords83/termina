@@ -116,6 +116,13 @@ class OccurrenceRestore(BaseModel):
 
 # ── RRULE-Expansion mit Override-Anwendung ────────────────────────────────────
 
+def _summary_with_age(summary: str | None, birth_year: int | None, occurrence_year: int) -> str | None:
+    """Hängt das Alter an, wenn das Event ein Geburtsjahr trägt (z.B. Geburtstage)."""
+    if summary is None or birth_year is None:
+        return summary
+    return f"{summary} ({occurrence_year - birth_year})"
+
+
 def expand_rrule_event(
     event: Event,
     from_: datetime,
@@ -161,7 +168,7 @@ def expand_rrule_event(
                 result.append({
                     "uid": event.uid,
                     "calendar_id": event.calendar_id,
-                    "summary": override.summary or event.summary,
+                    "summary": _summary_with_age(override.summary or event.summary, event.birth_year, inst.year),
                     "start": _dt_to_iso(ov_start, event.all_day),
                     "end": _dt_to_iso(ov_end, event.all_day),
                     "all_day": event.all_day,
@@ -181,7 +188,7 @@ def expand_rrule_event(
                 result.append({
                     "uid": event.uid,
                     "calendar_id": event.calendar_id,
-                    "summary": event.summary,
+                    "summary": _summary_with_age(event.summary, event.birth_year, inst.year),
                     "start": _dt_to_iso(inst_start, event.all_day),
                     "end": _dt_to_iso(inst_end, event.all_day),
                     "all_day": event.all_day,
@@ -206,7 +213,7 @@ def expand_rrule_event(
             return [{
                 "uid": event.uid,
                 "calendar_id": event.calendar_id,
-                "summary": event.summary,
+                "summary": _summary_with_age(event.summary, event.birth_year, event.start.year),
                 "start": _dt_to_iso(event.start, event.all_day),
                 "end": _dt_to_iso(event.end, event.all_day),
                 "all_day": event.all_day,
