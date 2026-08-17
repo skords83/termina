@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -11,7 +11,7 @@ from app.auth.dependencies import get_current_user
 from app.caldav.sync import run_sync
 from app.caldav.write import create_event
 from app.config import settings
-from app.db.models import Event, EventShare, User
+from app.db.models import Event, EventOverride, EventShare, EventShareInstanceState, User
 from app.db.session import get_db
 
 router = APIRouter(prefix="/event-shares", tags=["event-shares"])
@@ -105,3 +105,134 @@ def create_share(
     background.add_task(run_sync)
 
     return _share_out(share, has_drift=False)
+
+
+@router.get("")
+def list_shares(
+    source_uid: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    source = db.query(Event).filter(Event.uid == source_uid).first()
+    if source is None:
+        raise HTTPException(status_code=404, detail="Quelltermin nicht gefunden")
+    service.ensure_calendar_access(db, user, source.calendar_id)
+
+    shares = db.query(EventShare).filter(EventShare.source_uid == source_uid).all()
+    return [_share_out(s, _series_has_drift(s, source)) for s in shares]
+
+
+@router.post("/{share_id}/sync-snapshot")
+def sync_snapshot(
+    share_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    share = db.query(EventShare).filter(EventShare.id == share_id).first()
+    if share is None:
+        raise HTTPException(status_code=404, detail="Freigabe nicht gefunden")
+    source = db.query(Event).filter(Event.uid == share.source_uid).first()
+    if source is None:
+        raise HTTPException(status_code=404, detail="Quelltermin nicht gefunden")
+    service.ensure_calendar_access(db, user, source.calendar_id)
+
+    share.snapshot_start = source.start
+    share.snapshot_end = source.end
+    share.snapshot_summary = source.summary
+    share.snapshot_rrule = source.rrule
+    share.dismissed = True
+    db.commit()
+    return _share_out(share, has_drift=False)
+
+
+def _instance_snapshot_from_source(
+    db: Session, source_uid: str, recurrence_id: datetime,
+) -> tuple[datetime | None, datetime | None, str | None, bool]:
+    """Liest den aktuell wirksamen Zustand einer Instanz (Override oder Master-Werte).
+
+    Rückgabe: (start, end, summary, deleted)
+    """
+    rid_naive = _naive(recurrence_id)
+    override = db.query(EventOverride).filter(
+        EventOverride.master_uid == source_uid,
+        EventOverride.recurrence_id == rid_naive,
+    ).first()
+    if override is not None:
+        if override.start is None:
+            return None, None, None, True  # EXDATE-Sentinel: Instanz gelöscht
+        return override.start, override.end, override.summary, False
+
+    source = db.query(Event).filter(Event.uid == source_uid).first()
+    if source is None or source.start is None or source.end is None:
+        return None, None, None, False
+    duration = source.end - source.start
+    return rid_naive, rid_naive + duration, source.summary, False
+
+
+def _instance_overridden(db: Session, source_uid: str, recurrence_id: datetime) -> bool:
+    return db.query(EventOverride).filter(
+        EventOverride.master_uid == source_uid,
+        EventOverride.recurrence_id == _naive(recurrence_id),
+    ).first() is not None
+
+
+def _instance_has_drift(db: Session, share: EventShare, source_uid: str, recurrence_id: datetime) -> bool:
+    rid_naive = _naive(recurrence_id)
+    cur_start, cur_end, cur_summary, cur_deleted = _instance_snapshot_from_source(db, source_uid, rid_naive)
+
+    state = db.query(EventShareInstanceState).filter(
+        EventShareInstanceState.share_id == share.id,
+        EventShareInstanceState.source_recurrence_id == rid_naive,
+    ).first()
+    if state is None:
+        # Noch nie synchronisiert: nur Drift, wenn diese Instanz vom Standard-Serienverlauf
+        # abweicht (Override/Löschung vorhanden). Reine, unveränderte RRULE-Instanzen sind kein Drift.
+        return cur_deleted or _instance_overridden(db, source_uid, rid_naive)
+
+    return (
+        state.snapshot_deleted != cur_deleted
+        or state.snapshot_start != cur_start
+        or state.snapshot_end != cur_end
+        or state.snapshot_summary != cur_summary
+    )
+
+
+class InstanceSync(BaseModel):
+    source_recurrence_id: datetime
+
+
+@router.post("/{share_id}/instances/sync-snapshot")
+def sync_instance_snapshot(
+    share_id: int,
+    body: InstanceSync,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    share = db.query(EventShare).filter(EventShare.id == share_id).first()
+    if share is None:
+        raise HTTPException(status_code=404, detail="Freigabe nicht gefunden")
+    source = db.query(Event).filter(Event.uid == share.source_uid).first()
+    if source is None:
+        raise HTTPException(status_code=404, detail="Quelltermin nicht gefunden")
+    service.ensure_calendar_access(db, user, source.calendar_id)
+
+    rid_naive = _naive(body.source_recurrence_id)
+    start, end, summary, deleted = _instance_snapshot_from_source(db, share.source_uid, rid_naive)
+
+    state = db.query(EventShareInstanceState).filter(
+        EventShareInstanceState.share_id == share.id,
+        EventShareInstanceState.source_recurrence_id == rid_naive,
+    ).first()
+    if state is None:
+        state = EventShareInstanceState(share_id=share.id, source_recurrence_id=rid_naive)
+        db.add(state)
+
+    state.snapshot_start = start
+    state.snapshot_end = end
+    state.snapshot_summary = summary
+    state.snapshot_deleted = deleted
+    state.dismissed = True
+    state.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {"share_id": share.id, "source_recurrence_id": rid_naive.isoformat(), "dismissed": True}
