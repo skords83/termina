@@ -152,7 +152,8 @@
       "Bash(.venv/bin/python -m pytest)",
       "Bash(.venv/bin/python -m pytest tests/test_phase2_api.py::test_healthz)",
       "Bash(.venv/bin/python -m pytest -q)",
-      "Bash(.venv/bin/python3 *)"
+      "Bash(.venv/bin/python3 *)",
+      "Bash(rtk proxy *)"
     ]
   }
 }
