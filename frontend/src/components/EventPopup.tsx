@@ -29,6 +29,7 @@ interface Props {
   onEdit: (event: CalendarEvent) => void;
   onDuplicate: (event: CalendarEvent) => void;
   onCopy: (event: CalendarEvent) => void;
+  onShare: (event: CalendarEvent) => void;
   onDeleted: (uid: string, recurrenceId?: string | null, mode?: "single" | "future" | "all") => void;
 }
 
@@ -281,6 +282,7 @@ export function EventPopup({
   onEdit,
   onDuplicate,
   onCopy,
+  onShare,
   onDeleted,
 }: Props) {
   const { showToast } = useToast();
@@ -473,6 +475,17 @@ export function EventPopup({
                 aria-label="Termin duplizieren"
               >
                 ⧉
+              </button>
+              <button
+                style={S.btnEdit}
+                onClick={() => {
+                  onClose();
+                  onShare(event);
+                }}
+                title="Mit Oma + Opa teilen"
+                aria-label="Mit Oma + Opa teilen"
+              >
+                👪
               </button>
               <button
                 style={S.btnDelete}
