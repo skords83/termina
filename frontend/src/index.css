@@ -106,3 +106,14 @@ button {
 .share-buffer-row .share-field {
   flex: 1;
 }
+
+.share-drift-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 20px;
+  background: var(--accent-dim);
+  color: var(--text);
+  font-size: 0.85em;
+}

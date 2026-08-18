@@ -17,8 +17,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { deleteEvent } from "../api/write";
 import { downloadIcsEventExport } from "../api/ics";
+import { listEventShares } from "../api/shares";
 import { useToast } from "./Toast";
-import type { CalendarEvent, WriteError } from "../types";
+import { ShareDriftDialog } from "./ShareDriftDialog";
+import type { CalendarEvent, EventShare, WriteError } from "../types";
 
 interface Props {
   event: CalendarEvent;
@@ -291,6 +293,8 @@ export function EventPopup({
   const [recurringDeleteDialog, setRecurringDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [driftShare, setDriftShare] = useState<EventShare | null>(null);
+  const [driftDialogOpen, setDriftDialogOpen] = useState(false);
 
   // Position nach Mount berechnen (wenn DOM-Größe bekannt)
   useEffect(() => {
@@ -299,6 +303,24 @@ export function EventPopup({
     const { offsetWidth: w, offsetHeight: h } = popup;
     setPos(computePosition(anchorPos, w || 288, h || 200));
   }, [anchorPos]);
+
+  // Freigabe-Drift laden, wenn das Event als abweichend markiert ist
+  useEffect(() => {
+    if (!event.shared_drift) {
+      setDriftShare(null);
+      return;
+    }
+    let cancelled = false;
+    listEventShares(event.uid)
+      .then((shares) => {
+        if (cancelled) return;
+        setDriftShare(shares.find((s) => s.has_drift) ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [event.uid, event.shared_drift]);
 
   // Klick außerhalb schließt
   useEffect(() => {
@@ -389,6 +411,14 @@ export function EventPopup({
   const popup = (
     <div ref={popupRef} style={S.popup(pos.top, pos.left)}>
       <div style={S.colorBar(calendarColor)} />
+      {driftShare && (
+        <div className="share-drift-banner">
+          <span>⚠ Abweichung bei Oma + Opa erkannt.</span>
+          <button className="rec-cancel" onClick={() => setDriftDialogOpen(true)}>
+            Prüfen
+          </button>
+        </div>
+      )}
       <div style={S.body}>
         {/* Titel + Schließen */}
         <div style={S.header}>
@@ -549,6 +579,15 @@ export function EventPopup({
             </div>
           </div>
         </div>,
+        document.body,
+      )}
+      {driftDialogOpen && driftShare && createPortal(
+        <ShareDriftDialog
+          share={driftShare}
+          sourceEvent={event}
+          onClose={() => setDriftDialogOpen(false)}
+          onResolved={() => setDriftShare(null)}
+        />,
         document.body,
       )}
     </>
