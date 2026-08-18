@@ -44,7 +44,8 @@ from app.caldav.write import (
     CalDAVTimeoutError,
 )
 from app.caldav.sync import run_sync
-from app.db.models import Event, EventOverride, User
+from app.api.event_shares import _instance_has_drift, _naive, _series_has_drift
+from app.db.models import Event, EventOverride, EventShare, User
 from app.db.session import get_db
 
 router = APIRouter()
@@ -128,6 +129,7 @@ def expand_rrule_event(
     from_: datetime,
     to: datetime,
     overrides: dict[str, EventOverride] | None = None,
+    drift_fn=None,
 ) -> list[dict]:
     overrides = overrides or {}
 
@@ -178,6 +180,7 @@ def expand_rrule_event(
                     "is_recurring": True,
                     "recurrence_id": inst.isoformat(),
                     "rrule": event.rrule,
+                    "shared_drift": drift_fn(event.uid, inst.isoformat()) if drift_fn else False,
                 })
             else:
                 inst_start: datetime = inst
@@ -198,6 +201,7 @@ def expand_rrule_event(
                     "is_recurring": True,
                     "recurrence_id": inst.isoformat(),
                     "rrule": event.rrule,
+                    "shared_drift": drift_fn(event.uid, inst.isoformat()) if drift_fn else False,
                 })
 
         return result
@@ -223,6 +227,7 @@ def expand_rrule_event(
                 "is_recurring": True,
                 "recurrence_id": event.start.isoformat() if event.start else None,
                 "rrule": event.rrule,
+                "shared_drift": drift_fn(event.uid, event.start.isoformat()) if drift_fn and event.start else False,
             }]
         return []
 
@@ -269,6 +274,26 @@ def get_events(
         Event.start < to,  # Events die nach dem Fenster starten, haben keine Instanzen darin
     ).all()
 
+    all_events_by_uid: dict[str, Event] = {e.uid: e for e in non_rrule + rrule_events}
+    shares_by_source: dict[str, list[EventShare]] = {}
+    if all_events_by_uid:
+        for share in db.query(EventShare).filter(EventShare.source_uid.in_(all_events_by_uid.keys())).all():
+            shares_by_source.setdefault(share.source_uid, []).append(share)
+
+    def drift_fn(uid: str, recurrence_id: str | None) -> bool:
+        shares = shares_by_source.get(uid)
+        if not shares:
+            return False
+        source = all_events_by_uid[uid]
+        for share in shares:
+            if _series_has_drift(share, source):
+                return True
+            if recurrence_id is not None:
+                rid_dt = datetime.fromisoformat(recurrence_id)
+                if _instance_has_drift(db, share, uid, rid_dt):
+                    return True
+        return False
+
     result = []
 
     for e in non_rrule:
@@ -285,6 +310,7 @@ def get_events(
             "is_recurring": False,
             "recurrence_id": None,
             "rrule": None,
+            "shared_drift": drift_fn(e.uid, None),
         })
 
     overrides_by_uid: dict[str, dict[str, EventOverride]] = {}
@@ -301,7 +327,7 @@ def get_events(
             overrides_by_uid.setdefault(ov.master_uid, {})[ov.recurrence_id.isoformat()] = ov
 
     for e in rrule_events:
-        result.extend(expand_rrule_event(e, from_, to, overrides_by_uid.get(e.uid, {})))
+        result.extend(expand_rrule_event(e, from_, to, overrides_by_uid.get(e.uid, {}), drift_fn))
 
     return result
 
