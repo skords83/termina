@@ -211,3 +211,36 @@ def test_instance_has_drift_nach_sync_kein_drift_dann_erneute_aenderung_ist_drif
 
     assert _instance_has_drift(db, share, "src-1", rid) is True
     db.close()
+
+
+# --- Fix 1: recurrence_id-Parameter fuer list_shares (Instanz-Drift sichtbar) ---
+
+
+def test_list_shares_mit_recurrence_id_erkennt_instanz_drift(client, auth):
+    db = TestingSessionLocal()
+    share_id = _make_share(
+        db, datetime(2026, 6, 19, 9, 0), datetime(2026, 6, 19, 10, 0), "Einkaufen",
+        rrule="FREQ=WEEKLY;BYDAY=FR",
+    )
+    rid = datetime(2026, 6, 26, 9, 0)
+    # Instanz wurde verschoben, aber es existiert noch kein EventShareInstanceState
+    # dafuer -> unsynchronisierte Instanz-Drift.
+    db.add(EventOverride(
+        master_uid="src-1", recurrence_id=rid,
+        start=datetime(2026, 6, 26, 14, 0), end=datetime(2026, 6, 26, 15, 0),
+    ))
+    db.commit()
+    db.close()
+
+    r = client.get(
+        "/api/event-shares",
+        params={"source_uid": "src-1", "recurrence_id": "2026-06-26T09:00:00"},
+    )
+    assert r.status_code == 200
+    assert r.json()[0]["has_drift"] is True
+
+    # Ohne recurrence_id bleibt es beim reinen Serien-Drift-Check (kein Drift,
+    # da die Serie selbst unveraendert ist -- nur diese eine Instanz driftet).
+    r2 = client.get("/api/event-shares", params={"source_uid": "src-1"})
+    assert r2.status_code == 200
+    assert r2.json()[0]["has_drift"] is False

@@ -110,6 +110,7 @@ def create_share(
 @router.get("")
 def list_shares(
     source_uid: str = Query(...),
+    recurrence_id: datetime | None = Query(None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
@@ -119,7 +120,13 @@ def list_shares(
     service.ensure_calendar_access(db, user, source.calendar_id)
 
     shares = db.query(EventShare).filter(EventShare.source_uid == source_uid).all()
-    return [_share_out(s, _series_has_drift(s, source)) for s in shares]
+    result = []
+    for s in shares:
+        has_drift = _series_has_drift(s, source)
+        if not has_drift and recurrence_id is not None:
+            has_drift = _instance_has_drift(db, s, source_uid, recurrence_id)
+        result.append(_share_out(s, has_drift))
+    return result
 
 
 @router.post("/{share_id}/sync-snapshot")
