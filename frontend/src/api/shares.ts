@@ -42,9 +42,12 @@ export async function createEventShare(payload: CreateEventSharePayload): Promis
 
 // ── GET /api/event-shares?source_uid= ────────────────────────────
 
-export async function listEventShares(sourceUid: string): Promise<EventShare[]> {
+export async function listEventShares(sourceUid: string, recurrenceId?: string | null): Promise<EventShare[]> {
   const url = new URL('/api/event-shares', window.location.origin);
   url.searchParams.set('source_uid', sourceUid);
+  if (recurrenceId) {
+    url.searchParams.set('recurrence_id', recurrenceId);
+  }
   const res = await fetch(url.toString(), { credentials: 'include' });
   if (!res.ok) throw await parseError(res);
   return res.json();

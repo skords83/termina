@@ -311,12 +311,12 @@ export function EventPopup({
   // auch nicht-abweichende Freigaben relevant sind.
   const refetchShares = useCallback(async () => {
     try {
-      const shares = await listEventShares(event.uid);
+      const shares = await listEventShares(event.uid, event.recurrence_id);
       setAllShares(shares);
     } catch {
       // ignore
     }
-  }, [event.uid]);
+  }, [event.uid, event.recurrence_id]);
 
   useEffect(() => {
     refetchShares();
