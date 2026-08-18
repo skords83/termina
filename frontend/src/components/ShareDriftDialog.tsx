@@ -9,7 +9,8 @@ import { updateEvent } from '../api/write';
 import { syncShareSnapshot, syncInstanceShareSnapshot } from '../api/shares';
 import { apiFetch } from '../hooks/api';
 import { useToast } from './Toast';
-import type { CalendarEvent, EventShare, WriteError } from '../types';
+import { addMinutesLocal, mapRecurrenceId, parseLocalDatetime, toBackendDatetime } from '../utils/datetime';
+import type { CalendarEvent, EventShare, UpdateEventPayload, WriteError } from '../types';
 
 interface Props {
   share: EventShare;
@@ -18,23 +19,53 @@ interface Props {
   onResolved: () => void;
 }
 
-function addMinutesIso(iso: string, minutes: number): string {
-  const d = new Date(iso);
-  d.setMinutes(d.getMinutes() + minutes);
-  return d.toISOString();
+/**
+ * Baut den updateEvent-Payload für die series-/instance-level Übernahme der
+ * Drift-Werte. Als eigene, pure Funktion extrahiert, damit sie ohne
+ * Component-Rendering testbar ist (Fix 1: die RRULE darf bei einem
+ * series-level Update NIEMALS fehlen, sonst wird die Kopie beim Schreiben
+ * stillschweigend in einen nicht-wiederkehrenden Termin verwandelt).
+ */
+export function buildDriftUpdatePayload(params: {
+  etag: string;
+  summary: string;
+  start: string;
+  end: string;
+  allDay: boolean;
+  sourceRrule: string | null | undefined;
+  isInstance: boolean;
+  mappedRecurrenceId?: string;
+  copyHasSeriesRrule: boolean;
+}): UpdateEventPayload {
+  const { etag, summary, start, end, allDay, sourceRrule, isInstance, mappedRecurrenceId, copyHasSeriesRrule } = params;
+  return {
+    etag,
+    summary,
+    start,
+    end,
+    all_day: allDay,
+    // Die aktuelle RRULE der Quelle mitschicken — ohne sie würde ein
+    // series-level Update die RRULE der Kopie löschen (Backend defaultet
+    // rrule=None), was die Serie der Kopie permanent zerstört.
+    rrule: isInstance ? undefined : sourceRrule,
+    recurrence_id: isInstance ? mappedRecurrenceId : undefined,
+    mode: isInstance ? 'single' : copyHasSeriesRrule ? 'all' : undefined,
+  };
 }
 
 export function ShareDriftDialog({ share, sourceEvent, onClose, onResolved }: Props) {
   const { showToast } = useToast();
   const [busy, setBusy] = useState(false);
 
-  const newStart = addMinutesIso(sourceEvent.start, -share.buffer_before_minutes);
-  const newEnd = addMinutesIso(sourceEvent.end, share.buffer_after_minutes);
+  const newStart = addMinutesLocal(sourceEvent.start, -share.buffer_before_minutes);
+  const newEnd = addMinutesLocal(sourceEvent.end, share.buffer_after_minutes);
   const newSummary = sourceEvent.summary;
 
   const isInstance = !!sourceEvent.recurrence_id;
+  // Die Kopie liegt buffer_before_minutes VOR dem Original, daher wird hier
+  // subtrahiert (nicht addiert) — siehe utils/datetime.mapRecurrenceId.
   const mappedRecurrenceId = isInstance
-    ? addMinutesIso(sourceEvent.recurrence_id as string, share.buffer_before_minutes)
+    ? mapRecurrenceId(sourceEvent.recurrence_id as string, share.buffer_before_minutes)
     : undefined;
 
   const handleIgnore = async () => {
@@ -58,13 +89,13 @@ export function ShareDriftDialog({ share, sourceEvent, onClose, onResolved }: Pr
     setBusy(true);
     try {
       // Aktuellen Zustand der Kopie holen (für etag) — enges Zeitfenster um den neuen Termin.
-      const from = new Date(newStart);
+      const from = parseLocalDatetime(newStart);
       from.setDate(from.getDate() - 1);
-      const to = new Date(newEnd);
+      const to = parseLocalDatetime(newEnd);
       to.setDate(to.getDate() + 1);
       const events = await apiFetch<CalendarEvent[]>('/api/events', {
-        from: from.toISOString(),
-        to: to.toISOString(),
+        from: toBackendDatetime(from),
+        to: toBackendDatetime(to),
         calendar_id: share.target_calendar_id,
       });
       const target = events.find((e) => e.uid === share.shared_uid);
@@ -74,15 +105,20 @@ export function ShareDriftDialog({ share, sourceEvent, onClose, onResolved }: Pr
         return;
       }
 
-      await updateEvent(share.shared_uid, {
-        etag: target.etag ?? '',
-        summary: newSummary,
-        start: newStart,
-        end: newEnd,
-        all_day: sourceEvent.all_day,
-        recurrence_id: isInstance ? mappedRecurrenceId : undefined,
-        mode: isInstance ? 'single' : share.snapshot_rrule ? 'all' : undefined,
-      });
+      await updateEvent(
+        share.shared_uid,
+        buildDriftUpdatePayload({
+          etag: target.etag ?? '',
+          summary: newSummary,
+          start: newStart,
+          end: newEnd,
+          allDay: sourceEvent.all_day,
+          sourceRrule: sourceEvent.rrule,
+          isInstance,
+          mappedRecurrenceId,
+          copyHasSeriesRrule: !!share.snapshot_rrule,
+        }),
+      );
 
       if (isInstance && sourceEvent.recurrence_id) {
         await syncInstanceShareSnapshot(share.id, sourceEvent.recurrence_id);
