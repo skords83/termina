@@ -11,7 +11,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.main import app
 from app.auth.security import hash_password
-from app.db.models import Base, Event, EventOverride, Calendar, User, EventShare
+from app.api.event_shares import _instance_has_drift
+from app.db.models import Base, Event, EventOverride, Calendar, User, EventShare, EventShareInstanceState
 from app.db.session import get_db
 from app.config import settings
 
@@ -138,3 +139,75 @@ def test_instance_drift_durch_override_erkannt(client, auth):
 def test_sync_instance_snapshot_unbekannte_freigabe_404(client, auth):
     r = client.post("/api/event-shares/9999/instances/sync-snapshot", json={"source_recurrence_id": "2026-06-19T09:00:00"})
     assert r.status_code == 404
+
+
+# --- Direkte Unit-Tests fuer _instance_has_drift ---
+
+def test_instance_has_drift_unveraenderte_instanz_kein_drift(client, auth):
+    db = TestingSessionLocal()
+    share_id = _make_share(db, datetime(2026, 6, 19, 9, 0), datetime(2026, 6, 19, 10, 0), "Einkaufen", rrule="FREQ=WEEKLY;BYDAY=FR")
+    share = db.query(EventShare).filter(EventShare.id == share_id).first()
+    rid = datetime(2026, 6, 26, 9, 0)
+
+    assert _instance_has_drift(db, share, "src-1", rid) is False
+    db.close()
+
+
+def test_instance_has_drift_override_ohne_state_ist_drift(client, auth):
+    db = TestingSessionLocal()
+    share_id = _make_share(db, datetime(2026, 6, 19, 9, 0), datetime(2026, 6, 19, 10, 0), "Einkaufen", rrule="FREQ=WEEKLY;BYDAY=FR")
+    share = db.query(EventShare).filter(EventShare.id == share_id).first()
+    rid = datetime(2026, 6, 26, 9, 0)
+    db.add(EventOverride(master_uid="src-1", recurrence_id=rid, start=datetime(2026, 6, 26, 14, 0), end=datetime(2026, 6, 26, 15, 0)))
+    db.commit()
+
+    assert _instance_has_drift(db, share, "src-1", rid) is True
+    db.close()
+
+
+def test_instance_has_drift_geloeschte_instanz_ohne_state_ist_drift(client, auth):
+    db = TestingSessionLocal()
+    share_id = _make_share(db, datetime(2026, 6, 19, 9, 0), datetime(2026, 6, 19, 10, 0), "Einkaufen", rrule="FREQ=WEEKLY;BYDAY=FR")
+    share = db.query(EventShare).filter(EventShare.id == share_id).first()
+    rid = datetime(2026, 6, 26, 9, 0)
+    # EXDATE-Sentinel: Override ohne start markiert die Instanz als geloescht.
+    db.add(EventOverride(master_uid="src-1", recurrence_id=rid, start=None, end=None))
+    db.commit()
+
+    assert _instance_has_drift(db, share, "src-1", rid) is True
+    db.close()
+
+
+def test_instance_has_drift_nach_sync_kein_drift_dann_erneute_aenderung_ist_drift(client, auth):
+    db = TestingSessionLocal()
+    share_id = _make_share(db, datetime(2026, 6, 19, 9, 0), datetime(2026, 6, 19, 10, 0), "Einkaufen", rrule="FREQ=WEEKLY;BYDAY=FR")
+    share = db.query(EventShare).filter(EventShare.id == share_id).first()
+    rid = datetime(2026, 6, 26, 9, 0)
+    db.add(EventOverride(master_uid="src-1", recurrence_id=rid, start=datetime(2026, 6, 26, 14, 0), end=datetime(2026, 6, 26, 15, 0)))
+    db.commit()
+
+    # State-Snapshot passend zu den aktuellen (ueberschriebenen) Werten synchronisieren.
+    db.add(EventShareInstanceState(
+        share_id=share.id,
+        source_recurrence_id=rid,
+        snapshot_start=datetime(2026, 6, 26, 14, 0),
+        snapshot_end=datetime(2026, 6, 26, 15, 0),
+        snapshot_summary=None,
+        snapshot_deleted=False,
+        dismissed=True,
+        updated_at=datetime.utcnow(),
+    ))
+    db.commit()
+
+    assert _instance_has_drift(db, share, "src-1", rid) is False
+
+    # Quelle aendert sich erneut -> Drift muss wieder erkannt werden.
+    override = db.query(EventOverride).filter(
+        EventOverride.master_uid == "src-1", EventOverride.recurrence_id == rid
+    ).first()
+    override.start = datetime(2026, 6, 26, 16, 0)
+    override.end = datetime(2026, 6, 26, 17, 0)
+    db.commit()
+
+    assert _instance_has_drift(db, share, "src-1", rid) is True
+    db.close()
