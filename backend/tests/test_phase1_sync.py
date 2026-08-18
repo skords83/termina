@@ -16,7 +16,7 @@ from unittest.mock import patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.db.models import Base, Calendar, Event
+from app.db.models import Base, Calendar, Event, EventShare, EventShareInstanceState
 from app.caldav.sync import _upsert_event, run_sync
 
 BERLIN = zoneinfo.ZoneInfo("Europe/Berlin")
@@ -238,3 +238,62 @@ def test_run_sync_creates_calendar_and_event(in_memory_session):
     assert ev is not None
     assert ev.summary == "Testevent Sync"
     assert ev.etag == "etag-abc"
+
+
+def test_run_sync_raeumt_verwaiste_event_share_auf(in_memory_session):
+    """Fix 4: Wird ein Event serverseitig geloescht (z.B. Oma/Opa loeschen die
+    geteilte Kopie direkt in ihrer Kalender-App), muss run_sync auch die
+    zugehoerige EventShare (+ ihre Instance-States) aufraeumen -- sonst bleibt
+    ein verwaister Datensatz zurueck, der auf eine nicht mehr existierende UID zeigt."""
+    cal = Calendar(id="https://nc.example.com/cal/personal/", name="Persoenlich")
+    ev = Event(
+        uid="src-1@nc", calendar_id=cal.id, etag='"etag-abc"', summary="Zahnarzt",
+        start=datetime(2026, 6, 15, 10, 0), end=datetime(2026, 6, 15, 11, 0), all_day=False,
+    )
+    in_memory_session.add_all([cal, ev])
+    share = EventShare(
+        source_uid="src-1@nc", shared_uid="shared-1@nc",
+        target_calendar_id="https://nc.example.com/cal/oma-opa/",
+        snapshot_start=datetime(2026, 6, 15, 10, 0), snapshot_end=datetime(2026, 6, 15, 11, 0),
+        snapshot_summary="Zahnarzt", snapshot_rrule=None,
+        buffer_before_minutes=0, buffer_after_minutes=0, dismissed=False,
+        created_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    in_memory_session.add(share)
+    in_memory_session.commit()
+    share_id = share.id
+    in_memory_session.add(EventShareInstanceState(
+        share_id=share_id, source_recurrence_id=datetime(2026, 6, 15, 10, 0),
+        snapshot_start=datetime(2026, 6, 15, 10, 0), snapshot_end=datetime(2026, 6, 15, 11, 0),
+        snapshot_summary="Zahnarzt", snapshot_deleted=False, dismissed=False,
+        updated_at=datetime.now(UTC).replace(tzinfo=None),
+    ))
+    in_memory_session.commit()
+
+    mock_calendars = [
+        {
+            "url": "https://nc.example.com/cal/personal/",
+            "name": "Persoenlich",
+            "color": "#4A90D9",
+            "ctag": "ctag-v2",  # geaendertes ctag -> Sync wird nicht uebersprungen
+            "subscribed": False,
+            "source_url": None,
+        }
+    ]
+
+    with (
+        patch("app.caldav.sync.get_caldav_client", return_value=object()),
+        patch("app.caldav.sync._discover_calendars", return_value=mock_calendars),
+        patch("app.caldav.sync._propfind_etags", return_value={}),  # Event nicht mehr remote
+        patch("app.caldav.sync._multiget_ical", return_value={}),
+        patch("app.caldav.sync.db_session.SessionLocal", return_value=in_memory_session),
+    ):
+        run_sync()
+
+    assert in_memory_session.get(Event, "src-1@nc") is None
+    assert in_memory_session.query(EventShare).filter(
+        EventShare.source_uid == "src-1@nc"
+    ).first() is None
+    assert in_memory_session.query(EventShareInstanceState).filter(
+        EventShareInstanceState.share_id == share_id
+    ).first() is None
