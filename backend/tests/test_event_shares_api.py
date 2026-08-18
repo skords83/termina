@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.main import app
 from app.auth.security import hash_password
-from app.db.models import Base, Event, Calendar, User, EventShare
+from app.db.models import Base, Event, EventOverride, Calendar, User, EventShare
 from app.db.session import get_db
 from app.config import settings
 
@@ -133,6 +133,35 @@ def test_share_ohne_konfigurierten_zielkalender_400(client, auth, monkeypatch):
         "start": "2026-06-15T09:45:00", "end": "2026-06-15T11:15:00",
     })
     assert r.status_code == 400
+
+
+def test_share_serie_mit_bestehendem_override_kein_sofortiger_drift(client, auth):
+    """Serie mit bereits vorhandenem Override wird geteilt -> die betroffene Instanz
+    darf nicht sofort als gedriftet gelten (Fix 2: State wird beim Anlegen geseedet)."""
+    db = TestingSessionLocal()
+    rid = datetime(2026, 6, 26, 9, 0)
+    db.add(EventOverride(
+        master_uid="src-serie-1", recurrence_id=rid,
+        start=datetime(2026, 6, 26, 14, 0), end=datetime(2026, 6, 26, 15, 0),
+    ))
+    db.commit()
+    db.close()
+
+    with patch("app.api.event_shares.create_event", return_value="shared-serie-1"):
+        r = client.post("/api/event-shares", json={
+            "source_uid": "src-serie-1",
+            "summary": "Einkaufen freitags",
+            "start": "2026-06-19T09:00:00",
+            "end": "2026-06-19T10:00:00",
+        })
+    assert r.status_code == 201, r.text
+
+    r2 = client.get(
+        "/api/event-shares",
+        params={"source_uid": "src-serie-1", "recurrence_id": "2026-06-26T09:00:00"},
+    )
+    assert r2.status_code == 200
+    assert r2.json()[0]["has_drift"] is False
 
 
 def test_share_unbekannter_source_404(client, auth):

@@ -102,6 +102,20 @@ def create_share(
     db.add(share)
     db.commit()
     db.refresh(share)
+
+    # Fix 2: Fuer bereits vorhandene Overrides (z.B. eine schon verschobene/gestrichene
+    # Instanz einer Serie) sofort einen passenden EventShareInstanceState seeden --
+    # sonst wertet _instance_has_drift diese Instanz beim allerersten Abruf faelschlich
+    # als Drift ("noch nie synchronisiert" + Override vorhanden), obwohl sich seit dem
+    # Anlegen der Freigabe nichts geaendert hat.
+    existing_overrides = db.query(EventOverride).filter(
+        EventOverride.master_uid == source.uid
+    ).all()
+    for ov in existing_overrides:
+        _upsert_instance_state(db, share, source.uid, ov.recurrence_id, dismissed=False)
+    if existing_overrides:
+        db.commit()
+
     background.add_task(run_sync)
 
     return _share_out(share, has_drift=False)
@@ -176,25 +190,39 @@ def _instance_snapshot_from_source(
     return rid_naive, rid_naive + duration, source.summary, False
 
 
-def _instance_overridden(db: Session, source_uid: str, recurrence_id: datetime) -> bool:
-    return db.query(EventOverride).filter(
-        EventOverride.master_uid == source_uid,
-        EventOverride.recurrence_id == _naive(recurrence_id),
-    ).first() is not None
-
-
-def _instance_has_drift(db: Session, share: EventShare, source_uid: str, recurrence_id: datetime) -> bool:
+def _instance_snapshot_preloaded(
+    source: Event | None, override: EventOverride | None, recurrence_id: datetime,
+) -> tuple[datetime | None, datetime | None, str | None, bool]:
+    """Wie `_instance_snapshot_from_source`, aber ohne eigene DB-Queries -- Override und
+    Source werden vom Aufrufer bereits geladen mitgegeben (Batch-Pfad, siehe Fix 5)."""
     rid_naive = _naive(recurrence_id)
-    cur_start, cur_end, cur_summary, cur_deleted = _instance_snapshot_from_source(db, source_uid, rid_naive)
+    if override is not None:
+        if override.start is None:
+            return None, None, None, True  # EXDATE-Sentinel: Instanz gelöscht
+        return override.start, override.end, override.summary, False
 
-    state = db.query(EventShareInstanceState).filter(
-        EventShareInstanceState.share_id == share.id,
-        EventShareInstanceState.source_recurrence_id == rid_naive,
-    ).first()
+    if source is None or source.start is None or source.end is None:
+        return None, None, None, False
+    duration = source.end - source.start
+    return rid_naive, rid_naive + duration, source.summary, False
+
+
+def _instance_has_drift_preloaded(
+    share: EventShare,
+    source: Event | None,
+    recurrence_id: datetime,
+    override: EventOverride | None,
+    state: EventShareInstanceState | None,
+) -> bool:
+    """Drift-Berechnung fuer eine Instanz ohne eigene DB-Queries (Batch-Pfad, Fix 5)."""
+    rid_naive = _naive(recurrence_id)
+    cur_start, cur_end, cur_summary, cur_deleted = _instance_snapshot_preloaded(source, override, rid_naive)
+
     if state is None:
         # Noch nie synchronisiert: nur Drift, wenn diese Instanz vom Standard-Serienverlauf
         # abweicht (Override/Löschung vorhanden). Reine, unveränderte RRULE-Instanzen sind kein Drift.
-        return cur_deleted or _instance_overridden(db, source_uid, rid_naive)
+        # (cur_deleted impliziert immer override is not None, daher reicht die Existenzpruefung.)
+        return override is not None
 
     return (
         state.snapshot_deleted != cur_deleted
@@ -202,6 +230,47 @@ def _instance_has_drift(db: Session, share: EventShare, source_uid: str, recurre
         or state.snapshot_end != cur_end
         or state.snapshot_summary != cur_summary
     )
+
+
+def _instance_has_drift(db: Session, share: EventShare, source_uid: str, recurrence_id: datetime) -> bool:
+    rid_naive = _naive(recurrence_id)
+    override = db.query(EventOverride).filter(
+        EventOverride.master_uid == source_uid,
+        EventOverride.recurrence_id == rid_naive,
+    ).first()
+    source = db.query(Event).filter(Event.uid == source_uid).first()
+    state = db.query(EventShareInstanceState).filter(
+        EventShareInstanceState.share_id == share.id,
+        EventShareInstanceState.source_recurrence_id == rid_naive,
+    ).first()
+    return _instance_has_drift_preloaded(share, source, rid_naive, override, state)
+
+
+def _upsert_instance_state(
+    db: Session, share: EventShare, source_uid: str, recurrence_id: datetime, *, dismissed: bool,
+) -> EventShareInstanceState:
+    """Legt den EventShareInstanceState einer Instanz an oder aktualisiert ihn, sodass er
+    den aktuell wirksamen Zustand (Override oder Serien-Standard) widerspiegelt. Gemeinsame
+    Logik fuer `sync_instance_snapshot` (expliziter Nutzer-Sync) und `create_share`
+    (Seeding bereits vorhandener Overrides beim Anlegen der Freigabe, Fix 2)."""
+    rid_naive = _naive(recurrence_id)
+    start, end, summary, deleted = _instance_snapshot_from_source(db, source_uid, rid_naive)
+
+    state = db.query(EventShareInstanceState).filter(
+        EventShareInstanceState.share_id == share.id,
+        EventShareInstanceState.source_recurrence_id == rid_naive,
+    ).first()
+    if state is None:
+        state = EventShareInstanceState(share_id=share.id, source_recurrence_id=rid_naive)
+        db.add(state)
+
+    state.snapshot_start = start
+    state.snapshot_end = end
+    state.snapshot_summary = summary
+    state.snapshot_deleted = deleted
+    state.dismissed = dismissed
+    state.updated_at = datetime.utcnow()
+    return state
 
 
 class InstanceSync(BaseModel):
@@ -224,22 +293,7 @@ def sync_instance_snapshot(
     service.ensure_calendar_access(db, user, source.calendar_id)
 
     rid_naive = _naive(body.source_recurrence_id)
-    start, end, summary, deleted = _instance_snapshot_from_source(db, share.source_uid, rid_naive)
-
-    state = db.query(EventShareInstanceState).filter(
-        EventShareInstanceState.share_id == share.id,
-        EventShareInstanceState.source_recurrence_id == rid_naive,
-    ).first()
-    if state is None:
-        state = EventShareInstanceState(share_id=share.id, source_recurrence_id=rid_naive)
-        db.add(state)
-
-    state.snapshot_start = start
-    state.snapshot_end = end
-    state.snapshot_summary = summary
-    state.snapshot_deleted = deleted
-    state.dismissed = True
-    state.updated_at = datetime.utcnow()
+    _upsert_instance_state(db, share, share.source_uid, rid_naive, dismissed=True)
     db.commit()
 
     return {"share_id": share.id, "source_recurrence_id": rid_naive.isoformat(), "dismissed": True}
