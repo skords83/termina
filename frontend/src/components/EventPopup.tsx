@@ -20,6 +20,7 @@ import { downloadIcsEventExport } from "../api/ics";
 import { listEventShares } from "../api/shares";
 import { useToast } from "./Toast";
 import { ShareDriftDialog } from "./ShareDriftDialog";
+import { mapRecurrenceId } from "../utils/datetime";
 import type { CalendarEvent, EventShare, WriteError } from "../types";
 
 interface Props {
@@ -373,9 +374,14 @@ export function EventPopup({
         for (const share of allShares) {
           try {
             if (recurrenceId) {
-              const mappedRid = new Date(recurrenceId);
-              mappedRid.setMinutes(mappedRid.getMinutes() + share.buffer_before_minutes);
-              await deleteEvent(share.shared_uid, { recurrence_id: mappedRid.toISOString(), mode: "single" });
+              // Die Kopie liegt buffer_before_minutes VOR dem Original, daher
+              // wird hier subtrahiert (nicht addiert) — siehe
+              // utils/datetime.mapRecurrenceId. mode wird 1:1 vom Nutzer
+              // übernommen ("single" oder "future"), sonst würde bei
+              // "future" nur eine einzelne Instanz statt der ganzen
+              // restlichen Serie auf der Kopie gelöscht.
+              const mappedRid = mapRecurrenceId(recurrenceId, share.buffer_before_minutes);
+              await deleteEvent(share.shared_uid, { recurrence_id: mappedRid, mode: mode ?? "single" });
             } else {
               await deleteEvent(share.shared_uid, { mode: "all" });
             }
