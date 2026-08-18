@@ -45,7 +45,7 @@ from app.caldav.write import (
 )
 from app.caldav.sync import run_sync
 from app.api.event_shares import _instance_has_drift, _naive, _series_has_drift
-from app.db.models import Event, EventOverride, EventShare, User
+from app.db.models import Event, EventOverride, EventShare, EventShareInstanceState, User
 from app.db.session import get_db
 
 router = APIRouter()
@@ -1068,6 +1068,17 @@ def delete_event_endpoint(
         raise HTTPException(status_code=404, detail=str(e))
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
+
+    share_ids = [
+        row[0] for row in db.query(EventShare.id).filter(
+            (EventShare.source_uid == uid) | (EventShare.shared_uid == uid)
+        ).all()
+    ]
+    if share_ids:
+        db.query(EventShareInstanceState).filter(
+            EventShareInstanceState.share_id.in_(share_ids)
+        ).delete(synchronize_session=False)
+        db.query(EventShare).filter(EventShare.id.in_(share_ids)).delete(synchronize_session=False)
 
     db.query(EventOverride).filter(EventOverride.master_uid == uid).delete(synchronize_session=False)
     db.delete(event)
