@@ -3,10 +3,14 @@
 // Dialog für die Aktion "Mit Oma + Opa teilen": Titel/Start/Ende
 // vorausgefüllt aus dem Quelltermin, frei editierbar, plus zwei
 // Zeit-Puffer-Felder. Bei Serienterminen wird die ganze Serie kopiert.
+// Ganztägige Termine verwenden Datums- statt Datum/Zeit-Felder; die
+// Minuten-Puffer sind für sie ausgeblendet (siehe DateTimeField-Zweig in
+// EventFormModal.tsx für das gleiche Muster).
 
 import { useState } from 'react';
 import { createEventShare } from '../api/shares';
 import { useToast } from './Toast';
+import { addDaysLocal, addMinutesLocal, parseLocalDatetime, toBackendDatetime } from '../utils/datetime';
 import type { CalendarEvent, WriteError } from '../types';
 
 interface Props {
@@ -15,30 +19,28 @@ interface Props {
   onShared: () => void;
 }
 
-function addMinutes(iso: string, minutes: number): string {
-  const d = new Date(iso);
-  d.setMinutes(d.getMinutes() + minutes);
-  return d.toISOString().slice(0, 16);
-}
-
-function toLocalInputValue(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 export function ShareDialog({ event, onClose, onShared }: Props) {
   const { showToast } = useToast();
+  const allDay = event.all_day;
+
   const [summary, setSummary] = useState(event.summary);
-  const [start, setStart] = useState(toLocalInputValue(event.start));
-  const [end, setEnd] = useState(toLocalInputValue(event.end));
+  const [start, setStart] = useState(() =>
+    allDay
+      ? event.start.slice(0, 10)
+      : toBackendDatetime(parseLocalDatetime(event.start)),
+  );
+  const [end, setEnd] = useState(() =>
+    allDay
+      ? addDaysLocal(event.end.slice(0, 10), -1) // DTEND ist exklusiv -> für Anzeige -1 Tag
+      : toBackendDatetime(parseLocalDatetime(event.end)),
+  );
   const [bufferBefore, setBufferBefore] = useState(0);
   const [bufferAfter, setBufferAfter] = useState(0);
   const [saving, setSaving] = useState(false);
 
   const applyBuffers = (before: number, after: number) => {
-    setStart(toLocalInputValue(addMinutes(event.start, -before)));
-    setEnd(toLocalInputValue(addMinutes(event.end, after)));
+    setStart(addMinutesLocal(event.start, -before));
+    setEnd(addMinutesLocal(event.end, after));
   };
 
   const handleSave = async () => {
@@ -47,10 +49,9 @@ export function ShareDialog({ event, onClose, onShared }: Props) {
       await createEventShare({
         source_uid: event.uid,
         summary,
-        start: new Date(start).toISOString(),
-        end: new Date(end).toISOString(),
-        buffer_before_minutes: bufferBefore,
-        buffer_after_minutes: bufferAfter,
+        start: allDay ? start : `${start}:00`,
+        end: allDay ? addDaysLocal(end, 1) : `${end}:00`,
+        ...(allDay ? {} : { buffer_before_minutes: bufferBefore, buffer_after_minutes: bufferAfter }),
       });
       showToast('Mit Oma + Opa geteilt', 'success');
       onShared();
@@ -85,40 +86,50 @@ export function ShareDialog({ event, onClose, onShared }: Props) {
           </label>
           <label className="share-field">
             <span>Start</span>
-            <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
+            <input
+              type={allDay ? 'date' : 'datetime-local'}
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+            />
           </label>
           <label className="share-field">
             <span>Ende</span>
-            <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} />
+            <input
+              type={allDay ? 'date' : 'datetime-local'}
+              value={end}
+              onChange={(e) => setEnd(e.target.value)}
+            />
           </label>
-          <div className="share-buffer-row">
-            <label className="share-field">
-              <span>+Min. davor</span>
-              <input
-                type="number"
-                min={0}
-                value={bufferBefore}
-                onChange={(e) => {
-                  const v = Number(e.target.value) || 0;
-                  setBufferBefore(v);
-                  applyBuffers(v, bufferAfter);
-                }}
-              />
-            </label>
-            <label className="share-field">
-              <span>+Min. danach</span>
-              <input
-                type="number"
-                min={0}
-                value={bufferAfter}
-                onChange={(e) => {
-                  const v = Number(e.target.value) || 0;
-                  setBufferAfter(v);
-                  applyBuffers(bufferBefore, v);
-                }}
-              />
-            </label>
-          </div>
+          {!allDay && (
+            <div className="share-buffer-row">
+              <label className="share-field">
+                <span>+Min. davor</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={bufferBefore}
+                  onChange={(e) => {
+                    const v = Number(e.target.value) || 0;
+                    setBufferBefore(v);
+                    applyBuffers(v, bufferAfter);
+                  }}
+                />
+              </label>
+              <label className="share-field">
+                <span>+Min. danach</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={bufferAfter}
+                  onChange={(e) => {
+                    const v = Number(e.target.value) || 0;
+                    setBufferAfter(v);
+                    applyBuffers(bufferBefore, v);
+                  }}
+                />
+              </label>
+            </div>
+          )}
         </div>
 
         <div className="rec-dialog-footer">
