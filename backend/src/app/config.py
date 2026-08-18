@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     failed_login_max_attempts: int = 5
     lockout_minutes: int = 15
 
+    oma_opa_calendar_id: str | None = None
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

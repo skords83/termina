@@ -66,3 +66,54 @@ button {
   color: var(--text-3);
   opacity: 0.9;
 }
+
+.shared-drift-icon {
+  flex-shrink: 0;
+  margin-left: 4px;
+  padding-left: 4px;
+  font-size: 0.85em;
+  line-height: 1;
+  color: var(--accent);
+  opacity: 1;
+}
+
+/* ─── Share-Dialog ("Mit Oma + Opa teilen") ─────────────────────────── */
+.share-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 20px 16px;
+}
+.share-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85em;
+  color: var(--text-2);
+}
+.share-field input {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-size: 0.95em;
+}
+.share-buffer-row {
+  display: flex;
+  gap: 12px;
+}
+.share-buffer-row .share-field {
+  flex: 1;
+}
+
+.share-drift-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 20px;
+  background: var(--accent-dim);
+  color: var(--text);
+  font-size: 0.85em;
+}

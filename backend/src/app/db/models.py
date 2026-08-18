@@ -133,3 +133,37 @@ class UserCalendarAccess(Base):
     )
 
     user: Mapped["User"] = relationship("User", back_populates="calendar_access")
+
+
+class EventShare(Base):
+    __tablename__ = "event_shares"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_uid: Mapped[str] = mapped_column(String, ForeignKey("events.uid", ondelete="CASCADE"), nullable=False, index=True)
+    shared_uid: Mapped[str] = mapped_column(String, ForeignKey("events.uid", ondelete="CASCADE"), nullable=False, index=True)
+    target_calendar_id: Mapped[str] = mapped_column(String, nullable=False)
+    snapshot_start: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    snapshot_end: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    snapshot_summary: Mapped[str] = mapped_column(String, nullable=False)
+    snapshot_rrule: Mapped[str | None] = mapped_column(String, nullable=True)
+    buffer_before_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    buffer_after_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    dismissed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class EventShareInstanceState(Base):
+    __tablename__ = "event_share_instance_states"
+    __table_args__ = (
+        UniqueConstraint("share_id", "source_recurrence_id", name="uq_event_share_instance"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    share_id: Mapped[int] = mapped_column(Integer, ForeignKey("event_shares.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_recurrence_id: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    snapshot_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    snapshot_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    snapshot_summary: Mapped[str | None] = mapped_column(String, nullable=True)
+    snapshot_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    dismissed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

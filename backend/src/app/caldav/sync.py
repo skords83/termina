@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.caldav.client import get_caldav_client
 from app.db import session as db_session
-from app.db.models import Calendar, Event, EventOverride
+from app.db.models import Calendar, Event, EventOverride, EventShare, EventShareInstanceState
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +252,23 @@ def _infer_all_day(
     ):
         return True
     return False
+
+
+def _cleanup_orphaned_event_shares(db: Session, uid: str) -> None:
+    """Raeumt EventShare/EventShareInstanceState-Datensaetze auf, die auf ein gerade
+    geloeschtes Event verweisen (als Quelle ODER als geteilte Kopie) -- z.B. wenn
+    Oma/Opa einen geteilten Termin direkt in ihrer Kalender-App loeschen. Mirrort den
+    Cleanup-Block aus `delete_event_endpoint` (app/api/events.py)."""
+    share_ids = [
+        row[0] for row in db.query(EventShare.id).filter(
+            (EventShare.source_uid == uid) | (EventShare.shared_uid == uid)
+        ).all()
+    ]
+    if share_ids:
+        db.query(EventShareInstanceState).filter(
+            EventShareInstanceState.share_id.in_(share_ids)
+        ).delete(synchronize_session=False)
+        db.query(EventShare).filter(EventShare.id.in_(share_ids)).delete(synchronize_session=False)
 
 
 def _host_url(client) -> str:
@@ -908,6 +925,7 @@ def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
             db.query(EventOverride).filter(EventOverride.master_uid == uid).delete(
                 synchronize_session=False
             )
+            _cleanup_orphaned_event_shares(db, uid)
             db.delete(event)
             deleted_count += 1
 

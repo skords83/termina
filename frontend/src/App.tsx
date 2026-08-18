@@ -20,6 +20,7 @@ import { Sidebar } from './components/Sidebar';
 import { MonthView } from './components/MonthView';
 import { EventPopup } from './components/EventPopup';
 import { EventFormModal } from './components/EventFormModal';
+import { ShareDialog } from './components/ShareDialog';
 import { RecurringMoveDialog } from './components/RecurringMoveDialog';
 import { useOptimisticStore, useMergedEvents } from './store/eventsSlice';
 import { useHistoryStore } from './store/historySlice';
@@ -154,6 +155,7 @@ export default function App() {
   const [editModal, setEditModal] = useState<CalendarEvent | null>(null);
   const [createModal, setCreateModal] = useState<{ defaultDate: string } | null>(null);
   const [duplicateModal, setDuplicateModal] = useState<CalendarEvent | null>(null);
+  const [shareModal, setShareModal] = useState<CalendarEvent | null>(null);
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
   const [showSearch, setShowSearch] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -842,6 +844,7 @@ export default function App() {
             onEdit={(ev) => { setSelectedEvent(null); setEditModal(ev); }}
             onDuplicate={(ev) => { setSelectedEvent(null); setDuplicateModal(ev); }}
             onCopy={(ev) => { clipboardEventRef.current = ev; }}
+            onShare={(ev) => { setSelectedEvent(null); setShareModal(ev); }}
             onDeleted={(uid, recurrenceId, mode) => {
               if (recurrenceId) {
                 if (selectedEvent) {
@@ -908,6 +911,14 @@ export default function App() {
               optimistic.addOptimistic(ev);
               setRefreshNonce((n) => n + 1);
             }}
+          />
+        )}
+
+        {shareModal && (
+          <ShareDialog
+            event={shareModal}
+            onClose={() => setShareModal(null)}
+            onShared={() => setRefreshNonce((n) => n + 1)}
           />
         )}
 

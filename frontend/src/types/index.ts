@@ -17,6 +17,7 @@ export interface CalendarEvent {
   is_recurring?: boolean;
   recurrence_id?: string | null; // ISO 8601, das ursprüngliche Datum dieser Instanz
   rrule?: string | null;         // RRULE-String, z.B. "FREQ=WEEKLY;UNTIL=20261231T235959Z"
+  shared_drift?: boolean;
 }
 
 export interface CreateEventPayload {
@@ -84,3 +85,26 @@ export type WriteError =
   | { type: 'auth' }
   | { type: 'bad_request'; message: string }
   | { type: 'unknown'; status: number };
+
+export interface EventShare {
+  id: number;
+  source_uid: string;
+  shared_uid: string;
+  target_calendar_id: string;
+  snapshot_start: string;
+  snapshot_end: string;
+  snapshot_summary: string;
+  snapshot_rrule: string | null;
+  buffer_before_minutes: number;
+  buffer_after_minutes: number;
+  has_drift: boolean;
+}
+
+export interface CreateEventSharePayload {
+  source_uid: string;
+  summary: string;
+  start: string;
+  end: string;
+  buffer_before_minutes?: number;
+  buffer_after_minutes?: number;
+}
