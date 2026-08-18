@@ -293,8 +293,10 @@ export function EventPopup({
   const [recurringDeleteDialog, setRecurringDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
-  const [driftShare, setDriftShare] = useState<EventShare | null>(null);
+  const [allShares, setAllShares] = useState<EventShare[]>([]);
   const [driftDialogOpen, setDriftDialogOpen] = useState(false);
+  const [confirmShareDelete, setConfirmShareDelete] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{ recurrenceId?: string | null; mode?: "single" | "future" | "all" } | null>(null);
 
   // Position nach Mount berechnen (wenn DOM-Größe bekannt)
   useEffect(() => {
@@ -304,23 +306,22 @@ export function EventPopup({
     setPos(computePosition(anchorPos, w || 288, h || 200));
   }, [anchorPos]);
 
-  // Freigabe-Drift laden, wenn das Event als abweichend markiert ist
-  useEffect(() => {
-    if (!event.shared_drift) {
-      setDriftShare(null);
-      return;
+  // Freigaben laden — unabhängig vom Drift-Status, da für den Lösch-Intercept
+  // auch nicht-abweichende Freigaben relevant sind.
+  const refetchShares = useCallback(async () => {
+    try {
+      const shares = await listEventShares(event.uid);
+      setAllShares(shares);
+    } catch {
+      // ignore
     }
-    let cancelled = false;
-    listEventShares(event.uid)
-      .then((shares) => {
-        if (cancelled) return;
-        setDriftShare(shares.find((s) => s.has_drift) ?? null);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [event.uid, event.shared_drift]);
+  }, [event.uid]);
+
+  useEffect(() => {
+    refetchShares();
+  }, [refetchShares]);
+
+  const driftShare = allShares.find((s) => s.has_drift) ?? null;
 
   // Klick außerhalb schließt
   useEffect(() => {
@@ -362,11 +363,28 @@ export function EventPopup({
     return () => window.removeEventListener("keydown", handler);
   }, [event, onCopy, showToast]);
 
-  const executeDelete = useCallback(async (recurrenceId?: string | null, mode?: "single" | "future" | "all") => {
+  const executeDelete = useCallback(async (recurrenceId?: string | null, mode?: "single" | "future" | "all", alsoDeleteShared?: boolean) => {
     setDeleting(true);
     try {
       await deleteEvent(event.uid, { etag: event.etag ?? undefined, recurrence_id: recurrenceId, mode });
       showToast("Termin gelöscht", "success");
+
+      if (alsoDeleteShared) {
+        for (const share of allShares) {
+          try {
+            if (recurrenceId) {
+              const mappedRid = new Date(recurrenceId);
+              mappedRid.setMinutes(mappedRid.getMinutes() + share.buffer_before_minutes);
+              await deleteEvent(share.shared_uid, { recurrence_id: mappedRid.toISOString(), mode: "single" });
+            } else {
+              await deleteEvent(share.shared_uid, { mode: "all" });
+            }
+          } catch {
+            // Best effort – Haupt-Löschung ist bereits erfolgreich, nicht blockieren.
+          }
+        }
+      }
+
       onDeleted(event.uid, recurrenceId, mode);
       onClose();
     } catch (err) {
@@ -388,7 +406,16 @@ export function EventPopup({
       setConfirmDelete(false);
       setRecurringDeleteDialog(false);
     }
-  }, [event, onDeleted, onClose, showToast]);
+  }, [event, onDeleted, onClose, showToast, allShares]);
+
+  const requestDelete = useCallback((recurrenceId?: string | null, mode?: "single" | "future" | "all") => {
+    if (allShares.length > 0) {
+      setPendingDelete({ recurrenceId, mode });
+      setConfirmShareDelete(true);
+    } else {
+      executeDelete(recurrenceId, mode);
+    }
+  }, [allShares, executeDelete]);
 
   const handleExport = useCallback(async () => {
     try {
@@ -470,7 +497,7 @@ export function EventPopup({
               </button>
               <button
                 style={deleting ? S.btnDeleteLoading : S.btnDeleteConfirm}
-                onClick={() => executeDelete()}
+                onClick={() => requestDelete()}
                 disabled={deleting}
               >
                 {deleting ? "Löschen…" : "Wirklich löschen"}
@@ -543,7 +570,7 @@ export function EventPopup({
             <div className="rec-dialog-options">
               <button
                 className="rec-option"
-                onClick={() => { setRecurringDeleteDialog(false); executeDelete(event.recurrence_id, "single"); }}
+                onClick={() => { setRecurringDeleteDialog(false); requestDelete(event.recurrence_id, "single"); }}
                 disabled={deleting}
               >
                 <div className="rec-option-title">Nur diesen Termin</div>
@@ -553,7 +580,7 @@ export function EventPopup({
               </button>
               <button
                 className="rec-option"
-                onClick={() => { setRecurringDeleteDialog(false); executeDelete(event.recurrence_id, "future"); }}
+                onClick={() => { setRecurringDeleteDialog(false); requestDelete(event.recurrence_id, "future"); }}
                 disabled={deleting}
               >
                 <div className="rec-option-title">Dieser und alle folgenden</div>
@@ -563,7 +590,7 @@ export function EventPopup({
               </button>
               <button
                 className="rec-option"
-                onClick={() => { setRecurringDeleteDialog(false); executeDelete(undefined, "all"); }}
+                onClick={() => { setRecurringDeleteDialog(false); requestDelete(undefined, "all"); }}
                 disabled={deleting}
               >
                 <div className="rec-option-title">Alle Termine der Serie</div>
@@ -586,8 +613,46 @@ export function EventPopup({
           share={driftShare}
           sourceEvent={event}
           onClose={() => setDriftDialogOpen(false)}
-          onResolved={() => setDriftShare(null)}
+          onResolved={() => refetchShares()}
         />,
+        document.body,
+      )}
+      {confirmShareDelete && pendingDelete && createPortal(
+        <div className="modal-backdrop" onClick={() => setConfirmShareDelete(false)}>
+          <div className="rec-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="rec-dialog-header">
+              <h3 className="rec-dialog-title">Auch bei Oma + Opa löschen?</h3>
+              <p className="rec-dialog-sub">„{event.summary}" ist mit Oma + Opa geteilt.</p>
+            </div>
+            <div className="rec-dialog-options">
+              <button
+                className="rec-option"
+                onClick={() => {
+                  setConfirmShareDelete(false);
+                  executeDelete(pendingDelete.recurrenceId, pendingDelete.mode, true);
+                }}
+              >
+                <div className="rec-option-title">Ja, auch dort löschen</div>
+                <div className="rec-option-desc">Die Kopie bei Oma + Opa wird ebenfalls entfernt.</div>
+              </button>
+              <button
+                className="rec-option"
+                onClick={() => {
+                  setConfirmShareDelete(false);
+                  executeDelete(pendingDelete.recurrenceId, pendingDelete.mode, false);
+                }}
+              >
+                <div className="rec-option-title">Nein, nur hier löschen</div>
+                <div className="rec-option-desc">Die Kopie bei Oma + Opa bleibt bestehen.</div>
+              </button>
+            </div>
+            <div className="rec-dialog-footer">
+              <button className="rec-cancel" onClick={() => setConfirmShareDelete(false)}>
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        </div>,
         document.body,
       )}
     </>
