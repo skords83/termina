@@ -98,6 +98,11 @@ button {
   padding: 8px 10px;
   color: var(--text);
   font-size: 0.95em;
+  color-scheme: dark;
+}
+.share-field input::-webkit-calendar-picker-indicator {
+  filter: invert(0.4);
+  cursor: pointer;
 }
 .share-buffer-row {
   display: flex;

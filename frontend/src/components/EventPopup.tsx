@@ -123,7 +123,7 @@ const S = {
     background: "#1e1e1e",
     border: "1px solid #2e2e2e",
     borderRadius: "0.625rem",
-    width: "19.5rem",
+    width: "21rem",
     boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
     fontFamily: "DM Sans, sans-serif",
     color: "#e8e6e3",
@@ -204,8 +204,9 @@ const S = {
   },
   actions: {
     display: "flex",
+    flexWrap: "wrap" as const,
     justifyContent: "flex-end",
-    gap: "0.375rem",
+    gap: "0.3125rem",
     paddingTop: "0.125rem",
   },
   btnEdit: {
@@ -220,6 +221,21 @@ const S = {
     display: "flex",
     alignItems: "center",
     gap: "0.3rem",
+  },
+  btnIcon: {
+    background: "none",
+    border: "1px solid #2e2e2e",
+    borderRadius: "0.375rem",
+    color: "#aaa",
+    width: "2.125rem",
+    height: "2.125rem",
+    padding: 0,
+    fontSize: "1.0625rem",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
   },
   btnDelete: {
     background: "none",
@@ -512,7 +528,7 @@ export function EventPopup({
           ) : (
             <>
               <button
-                style={S.btnEdit}
+                style={S.btnIcon}
                 onClick={handleExport}
                 title="Als .ics exportieren"
                 aria-label="Als .ics exportieren"
@@ -520,16 +536,18 @@ export function EventPopup({
                 ⭳
               </button>
               <button
-                style={S.btnEdit}
+                style={S.btnIcon}
                 onClick={() => {
                   onClose();
                   onEdit(event);
                 }}
+                title="Bearbeiten"
+                aria-label="Bearbeiten"
               >
-                ✎ Bearbeiten
+                ✎
               </button>
               <button
-                style={S.btnEdit}
+                style={S.btnIcon}
                 onClick={() => {
                   onClose();
                   onDuplicate(event);
@@ -540,7 +558,7 @@ export function EventPopup({
                 ⧉
               </button>
               <button
-                style={S.btnEdit}
+                style={S.btnIcon}
                 onClick={() => {
                   onClose();
                   onShare(event);

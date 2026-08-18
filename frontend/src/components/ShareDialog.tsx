@@ -136,7 +136,7 @@ export function ShareDialog({ event, onClose, onShared }: Props) {
           <button className="rec-cancel" onClick={onClose} disabled={saving}>
             Abbrechen
           </button>
-          <button className="rec-option" style={{ flex: 'none', padding: '8px 16px' }} onClick={handleSave} disabled={saving}>
+          <button className="btn-primary" onClick={handleSave} disabled={saving}>
             {saving ? 'Teilen…' : 'Teilen'}
           </button>
         </div>
