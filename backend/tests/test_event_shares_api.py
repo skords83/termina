@@ -172,6 +172,39 @@ def test_share_unbekannter_source_404(client, auth):
     assert r.status_code == 404
 
 
+def test_share_zielkalender_ungueltig_404(client, auth):
+    """create_event schlaegt mit ValueError fehl (z.B. Zielkalender existiert nicht
+    mehr) -- muss als sauberes 404 durchgereicht werden, nicht als 500."""
+    with patch(
+        "app.api.event_shares.create_event",
+        side_effect=ValueError("Kalender nicht gefunden"),
+    ):
+        r = client.post("/api/event-shares", json={
+            "source_uid": "src-uid-1", "summary": "Kinder hüten",
+            "start": "2026-06-15T09:45:00", "end": "2026-06-15T11:15:00",
+        })
+    assert r.status_code == 404, r.text
+    assert "Kalender nicht gefunden" in r.json()["detail"]
+
+    db = TestingSessionLocal()
+    assert db.query(EventShare).filter(EventShare.source_uid == "src-uid-1").first() is None
+    db.close()
+
+
+def test_share_caldav_timeout_503(client, auth):
+    from app.caldav.write import CalDAVTimeoutError
+
+    with patch(
+        "app.api.event_shares.create_event",
+        side_effect=CalDAVTimeoutError("Zeitüberschreitung"),
+    ):
+        r = client.post("/api/event-shares", json={
+            "source_uid": "src-uid-1", "summary": "Kinder hüten",
+            "start": "2026-06-15T09:45:00", "end": "2026-06-15T11:15:00",
+        })
+    assert r.status_code == 503, r.text
+
+
 def test_share_ohne_auth_401(client):
     r = client.post("/api/event-shares", json={
         "source_uid": "src-uid-1", "summary": "X",

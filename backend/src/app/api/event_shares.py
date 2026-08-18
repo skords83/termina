@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.auth import service
 from app.auth.dependencies import get_current_user
 from app.caldav.sync import run_sync
-from app.caldav.write import create_event
+from app.caldav.write import CalDAVTimeoutError, create_event
 from app.config import settings
 from app.db.models import Event, EventOverride, EventShare, EventShareInstanceState, User
 from app.db.session import get_db
@@ -75,16 +75,21 @@ def create_share(
         )
     service.ensure_calendar_access(db, user, target_calendar_id)
 
-    shared_uid = create_event(
-        calendar_id=target_calendar_id,
-        summary=body.summary,
-        start=body.start,
-        end=body.end,
-        all_day=source.all_day,
-        location=None,
-        description=None,
-        rrule=source.rrule,
-    )
+    try:
+        shared_uid = create_event(
+            calendar_id=target_calendar_id,
+            summary=body.summary,
+            start=body.start,
+            end=body.end,
+            all_day=source.all_day,
+            location=None,
+            description=None,
+            rrule=source.rrule,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except CalDAVTimeoutError as e:
+        raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
 
     share = EventShare(
         source_uid=source.uid,
