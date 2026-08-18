@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import service
@@ -22,8 +22,8 @@ class EventShareCreate(BaseModel):
     summary: str
     start: datetime
     end: datetime
-    buffer_before_minutes: int = 0
-    buffer_after_minutes: int = 0
+    buffer_before_minutes: int = Field(default=0, ge=0)
+    buffer_after_minutes: int = Field(default=0, ge=0)
 
 
 def _naive(dt: datetime) -> datetime:
@@ -31,6 +31,10 @@ def _naive(dt: datetime) -> datetime:
 
 
 def _series_has_drift(share: EventShare, source: Event) -> bool:
+    if source.start is None or source.end is None:
+        # Nullable-Spalten: ohne verlaessliche Zeit koennen wir nicht sinnvoll
+        # vergleichen -- als gedriftet behandeln statt beim .replace() abzustuerzen.
+        return True
     return (
         _naive(share.snapshot_start) != _naive(source.start)
         or _naive(share.snapshot_end) != _naive(source.end)
@@ -183,16 +187,8 @@ def _instance_snapshot_from_source(
         EventOverride.master_uid == source_uid,
         EventOverride.recurrence_id == rid_naive,
     ).first()
-    if override is not None:
-        if override.start is None:
-            return None, None, None, True  # EXDATE-Sentinel: Instanz gelöscht
-        return override.start, override.end, override.summary, False
-
     source = db.query(Event).filter(Event.uid == source_uid).first()
-    if source is None or source.start is None or source.end is None:
-        return None, None, None, False
-    duration = source.end - source.start
-    return rid_naive, rid_naive + duration, source.summary, False
+    return _instance_snapshot_preloaded(source, override, rid_naive)
 
 
 def _instance_snapshot_preloaded(

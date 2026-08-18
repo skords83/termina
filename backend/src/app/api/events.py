@@ -44,7 +44,7 @@ from app.caldav.write import (
     CalDAVTimeoutError,
 )
 from app.caldav.sync import run_sync
-from app.api.event_shares import _instance_has_drift, _naive, _series_has_drift
+from app.api.event_shares import _instance_has_drift_preloaded, _naive, _series_has_drift
 from app.db.models import Event, EventOverride, EventShare, EventShareInstanceState, User
 from app.db.session import get_db
 
@@ -280,6 +280,31 @@ def get_events(
         for share in db.query(EventShare).filter(EventShare.source_uid.in_(all_events_by_uid.keys())).all():
             shares_by_source.setdefault(share.source_uid, []).append(share)
 
+    # Fix 5 (Performance): alle EventShareInstanceState-Zeilen fuer die betroffenen
+    # Shares in einer Query vorladen, statt pro expandierter Instanz einzeln zu fragen.
+    all_share_ids = [s.id for shares in shares_by_source.values() for s in shares]
+    instance_states_by_key: dict[tuple[int, datetime], EventShareInstanceState] = {}
+    if all_share_ids:
+        for state in (
+            db.query(EventShareInstanceState)
+            .filter(EventShareInstanceState.share_id.in_(all_share_ids))
+            .all()
+        ):
+            instance_states_by_key[(state.share_id, state.source_recurrence_id)] = state
+
+    overrides_by_uid: dict[str, dict[str, EventOverride]] = {}
+    if rrule_events:
+        uids = [e.uid for e in rrule_events]
+        all_overrides = (
+            db.query(EventOverride)
+            .filter(EventOverride.master_uid.in_(uids))
+            .all()
+        )
+        for ov in all_overrides:
+            if ov.recurrence_id is None:
+                continue
+            overrides_by_uid.setdefault(ov.master_uid, {})[ov.recurrence_id.isoformat()] = ov
+
     def drift_fn(uid: str, recurrence_id: str | None) -> bool:
         shares = shares_by_source.get(uid)
         if not shares:
@@ -290,7 +315,12 @@ def get_events(
                 return True
             if recurrence_id is not None:
                 rid_dt = datetime.fromisoformat(recurrence_id)
-                if _instance_has_drift(db, share, uid, rid_dt):
+                # overrides_by_uid ist mit demselben inst.isoformat()-Schluessel befuellt,
+                # den expand_rrule_event auch fuer den eigenen Override-Lookup nutzt --
+                # kein zusaetzlicher Query noetig, um dasselbe Objekt wiederzuverwenden.
+                override = overrides_by_uid.get(uid, {}).get(recurrence_id)
+                state = instance_states_by_key.get((share.id, _naive(rid_dt)))
+                if _instance_has_drift_preloaded(share, source, rid_dt, override, state):
                     return True
         return False
 
@@ -312,19 +342,6 @@ def get_events(
             "rrule": None,
             "shared_drift": drift_fn(e.uid, None),
         })
-
-    overrides_by_uid: dict[str, dict[str, EventOverride]] = {}
-    if rrule_events:
-        uids = [e.uid for e in rrule_events]
-        all_overrides = (
-            db.query(EventOverride)
-            .filter(EventOverride.master_uid.in_(uids))
-            .all()
-        )
-        for ov in all_overrides:
-            if ov.recurrence_id is None:
-                continue
-            overrides_by_uid.setdefault(ov.master_uid, {})[ov.recurrence_id.isoformat()] = ov
 
     for e in rrule_events:
         result.extend(expand_rrule_event(e, from_, to, overrides_by_uid.get(e.uid, {}), drift_fn))

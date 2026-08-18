@@ -244,3 +244,19 @@ def test_list_shares_mit_recurrence_id_erkennt_instanz_drift(client, auth):
     r2 = client.get("/api/event-shares", params={"source_uid": "src-1"})
     assert r2.status_code == 200
     assert r2.json()[0]["has_drift"] is False
+
+
+# --- Minor: _series_has_drift darf bei None-start/end nicht crashen ---
+
+
+def test_series_has_drift_none_start_ist_drift():
+    from app.api.event_shares import _series_has_drift
+
+    source = Event(uid="x", calendar_id=SRC_CAL, summary="s", start=None, end=None, all_day=False)
+    share = EventShare(
+        source_uid="x", shared_uid="y", target_calendar_id=OMA_OPA_CAL,
+        snapshot_start=datetime(2026, 1, 1, 0, 0), snapshot_end=datetime(2026, 1, 1, 1, 0),
+        snapshot_summary="s", snapshot_rrule=None, buffer_before_minutes=0,
+        buffer_after_minutes=0, dismissed=False, created_at=datetime.utcnow(),
+    )
+    assert _series_has_drift(share, source) is True

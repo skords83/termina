@@ -205,6 +205,15 @@ def test_share_caldav_timeout_503(client, auth):
     assert r.status_code == 503, r.text
 
 
+def test_share_negativer_buffer_422(client, auth):
+    r = client.post("/api/event-shares", json={
+        "source_uid": "src-uid-1", "summary": "X",
+        "start": "2026-06-15T09:45:00", "end": "2026-06-15T11:15:00",
+        "buffer_before_minutes": -5,
+    })
+    assert r.status_code == 422
+
+
 def test_share_ohne_auth_401(client):
     r = client.post("/api/event-shares", json={
         "source_uid": "src-uid-1", "summary": "X",
