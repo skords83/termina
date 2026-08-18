@@ -67,6 +67,16 @@ button {
   opacity: 0.9;
 }
 
+.shared-drift-icon {
+  flex-shrink: 0;
+  margin-left: 4px;
+  padding-left: 4px;
+  font-size: 0.85em;
+  line-height: 1;
+  color: var(--accent);
+  opacity: 1;
+}
+
 /* ─── Share-Dialog ("Mit Oma + Opa teilen") ─────────────────────────── */
 .share-dialog-body {
   display: flex;

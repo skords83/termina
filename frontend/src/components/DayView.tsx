@@ -165,6 +165,9 @@ function DraggableDayEvent({
             {ev.is_recurring && (
               <span className="recur-icon" title="Wiederholt sich" aria-label="Wiederholt sich">⟲</span>
             )}
+            {ev.shared_drift && (
+              <span className="shared-drift-icon" title="Abweichung bei Oma+Opa" aria-label="Abweichung bei Oma+Opa">⚠</span>
+            )}
           </div>
           {showTime && (
             <div className="day-event-time">
@@ -315,6 +318,9 @@ export default function DayView({
                   <span className="day-allday-event-text">{ev.summary}</span>
                   {ev.is_recurring && (
                     <span className="recur-icon" title="Wiederholt sich" aria-label="Wiederholt sich">⟲</span>
+                  )}
+                  {ev.shared_drift && (
+                    <span className="shared-drift-icon" title="Abweichung bei Oma+Opa" aria-label="Abweichung bei Oma+Opa">⚠</span>
                   )}
                 </div>
               );
