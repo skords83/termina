@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     lockout_minutes: int = 15
 
     oma_opa_calendar_id: str | None = None
+    oma_opa_export_token: str | None = None
 
     model_config = {
         "env_file": ".env",
