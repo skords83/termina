@@ -55,3 +55,14 @@ Für Backend-Entwicklung außerhalb von Docker `backend/.env.example` nach
 `API_PROXY_TARGET` kann das Ziel überschreiben. Die Images verwenden die
 versionierten Lockfiles. Tests, Build und npm-Audit müssen vor Veröffentlichung
 und Deployment erfolgreich sein.
+
+## Deployment-Verzeichnis
+
+Der SSH-Deploy liest Projektname und Compose-Dateien aus den Labels der vorhandenen
+Container `termina-backend` bzw. `termina-frontend`. Dockhand-interne Pfade werden
+über die tatsächlichen Docker-Mounts auf Host-Pfade aufgelöst. Der Projektname
+bleibt erhalten, damit das bestehende Datenvolume weiterverwendet wird.
+Bei einer mehrdeutigen oder abweichenden Installation kann die GitHub-Actions-
+Repository-Variable `TERMINA_DEPLOY_DIR` auf das aktuelle Stack-Verzeichnis auf
+dem Host gesetzt werden. Fehlende Pfade oder ungültige Compose-Dateien brechen
+den Deploy vor Änderungen an den Containern ab.

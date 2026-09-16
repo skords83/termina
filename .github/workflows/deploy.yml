@@ -14,6 +14,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - run: bash -n scripts/deploy.sh && python3 -m unittest discover -s scripts/tests
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -67,13 +68,20 @@ jobs:
           push: true
           tags: ${{ env.IMAGE_PREFIX }}/backend:latest
 
+      - name: Load deployment script
+        id: deploy-script
+        run: |
+          echo 'script<<TERMINA_DEPLOY_SCRIPT' >> "$GITHUB_OUTPUT"
+          cat scripts/deploy.sh >> "$GITHUB_OUTPUT"
+          echo 'TERMINA_DEPLOY_SCRIPT' >> "$GITHUB_OUTPUT"
+
       - name: Redeploy on server
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          TERMINA_DEPLOY_DIR: ${{ vars.TERMINA_DEPLOY_DIR }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            cd /var/lib/docker/volumes/docker_dockhand_data/_data/stacks/VPS/termina
-            docker compose pull
-            docker compose up -d
+          envs: TERMINA_DEPLOY_DIR
+          script: ${{ steps.deploy-script.outputs.script }}
