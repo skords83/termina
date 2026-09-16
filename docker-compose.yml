@@ -3,7 +3,7 @@ services:
     build: ./backend
     container_name: termina-backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./backend:/app
       - ./data:/data
@@ -18,7 +18,7 @@ services:
       dockerfile: Dockerfile.dev
     container_name: termina-frontend
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     volumes:
       - ./frontend:/app
       - /app/node_modules

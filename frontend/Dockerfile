@@ -1,12 +1,9 @@
 # Stage 1: Vite-Build
-FROM node:20-slim AS builder
+FROM node:24-slim AS builder
 WORKDIR /app
-COPY package.json ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY . .
-# Vite-Env-Variablen werden zur Build-Zeit eingebacken
-ARG VITE_API_BASE_URL=/api
-ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
 # Stage 2: nginx serviert das Build-Artefakt

@@ -147,11 +147,18 @@ def expand_rrule_event(
 
         rule = rrulestr(rrule_str, ignoretz=True)
         instances = rule.between(
-            from_ - timedelta(days=1),
+            from_ - max(duration, timedelta(0)),
             to + timedelta(days=1),
             inc=True,
         )
 
+        # Moved occurrences belong to their actual window, even when the
+        # original recurrence date lies outside it. Keep the original identity.
+        instances = sorted(set(instances) | {
+            ov.recurrence_id for ov in overrides.values()
+            if ov.start is not None and ov.start < to
+            and (ov.end or ov.start + duration) > from_
+        })
         result = []
         for inst in instances:
             inst_key = inst.isoformat()
@@ -271,7 +278,6 @@ def get_events(
     )
     rrule_events = q.filter(
         Event.rrule.isnot(None),
-        Event.start < to,  # Events die nach dem Fenster starten, haben keine Instanzen darin
     ).all()
 
     all_events_by_uid: dict[str, Event] = {e.uid: e for e in non_rrule + rrule_events}
@@ -519,7 +525,7 @@ def put_event(
         try:
             new_uid = update_event_future(
                 calendar_id=event.calendar_id,
-                uid=uid,
+                uid=event.remote_uid or uid,
                 etag=body.etag,
                 summary=body.summary,
                 start=start_dt,
@@ -598,7 +604,7 @@ def put_event(
         try:
             update_event(
                 calendar_id=event.calendar_id,
-                uid=uid,
+                uid=event.remote_uid or uid,
                 etag=body.etag,
                 summary=body.summary,
                 start=start_dt,
@@ -637,7 +643,7 @@ def put_event(
             move_event_calendar(
                 old_calendar_id=event.calendar_id,
                 new_calendar_id=body.calendar_id,
-                uid=uid,
+                uid=event.remote_uid or uid,
                 etag=body.etag,
                 summary=body.summary,
                 start=start_dt,
@@ -662,7 +668,7 @@ def put_event(
     try:
         update_event(
             calendar_id=event.calendar_id,
-            uid=uid,
+            uid=event.remote_uid or uid,
             etag=body.etag,
             summary=body.summary,
             start=start_dt,
@@ -714,7 +720,7 @@ def post_move(
         result = move_event(
             mode=body.mode,
             calendar_id=event.calendar_id,
-            uid=uid,
+            uid=event.remote_uid or uid,
             etag=body.etag,
             original_start=body.original_start,
             new_start=body.new_start,
@@ -843,7 +849,7 @@ def post_resize(
         result = resize_event(
             mode=body.mode,
             calendar_id=event.calendar_id,
-            uid=uid,
+            uid=event.remote_uid or uid,
             etag=body.etag,
             occurrence_start=body.occurrence_start,
             new_end=body.new_end,
@@ -953,7 +959,7 @@ def post_restore_occurrence(
     try:
         restore_occurrence(
             calendar_id=event.calendar_id,
-            uid=uid,
+            uid=event.remote_uid or uid,
             etag=body.etag,
             recurrence_id=body.recurrence_id,
             all_day=event.all_day,
@@ -1007,7 +1013,7 @@ def delete_event_endpoint(
         try:
             delete_future_occurrences(
                 calendar_id=event.calendar_id,
-                uid=uid,
+                uid=event.remote_uid or uid,
                 etag=etag,
                 recurrence_id=rid_dt,
                 all_day=event.all_day,
@@ -1044,7 +1050,7 @@ def delete_event_endpoint(
         try:
             delete_occurrence(
                 calendar_id=event.calendar_id,
-                uid=uid,
+                uid=event.remote_uid or uid,
                 etag=etag,
                 recurrence_id=rid_dt,
                 all_day=event.all_day,
@@ -1076,7 +1082,7 @@ def delete_event_endpoint(
     try:
         delete_event(
             calendar_id=event.calendar_id,
-            uid=uid,
+            uid=event.remote_uid or uid,
             etag=etag,
         )
     except ConflictError:

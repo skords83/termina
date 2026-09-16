@@ -1,10 +1,10 @@
-FROM node:20-slim
+FROM node:24-slim
 
 WORKDIR /app
 
 # Deps zuerst (Layer-Caching)
-COPY package.json ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 
 # Source
 COPY . .

@@ -1,11 +1,11 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import service
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_authenticated_user
 from app.auth.security import verify_password
 from app.config import settings
 from app.db.models import User
@@ -22,7 +22,7 @@ class LoginRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str | None = None
-    new_password: str
+    new_password: str = Field(min_length=12, max_length=1024)
 
 
 class UserOut(BaseModel):
@@ -75,18 +75,21 @@ def logout(
 
 
 @router.get("/me", response_model=UserOut)
-def me(user: User = Depends(get_current_user)) -> User:
+def me(user: User = Depends(get_authenticated_user)) -> User:
     return user
 
 
 @router.post("/change-password", response_model=UserOut)
 def change_password(
     body: ChangePasswordRequest,
-    user: User = Depends(get_current_user),
+    response: Response,
+    user: User = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ) -> User:
     if not user.must_change_password:
         if body.current_password is None or not verify_password(body.current_password, user.password_hash):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Aktuelles Passwort falsch")
     service.change_password(db, user, body.new_password)
+    raw_token, expires_at = service.create_session(db, user, remember_me=False)
+    _set_session_cookie(response, raw_token, expires_at)
     return user

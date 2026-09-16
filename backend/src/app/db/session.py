@@ -33,6 +33,7 @@ _MIGRATIONS: list[tuple[str, str]] = [
 # über die obige rein deklarative Liste.
 _COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
     ("events", "birth_year", "ALTER TABLE events ADD COLUMN birth_year INTEGER"),
+    ("events", "remote_uid", "ALTER TABLE events ADD COLUMN remote_uid VARCHAR"),
 ]
 
 
@@ -57,6 +58,9 @@ def apply_migrations() -> None:
             if column not in existing:
                 conn.execute(text(ddl))
                 logger.info("Spalte hinzugefügt: %s.%s", table, column)
+                if table == "events" and column == "remote_uid":
+                    conn.execute(text("UPDATE calendars SET ctag = NULL"))
+                    conn.execute(text("UPDATE events SET etag = NULL"))
 
         conn.commit()
 

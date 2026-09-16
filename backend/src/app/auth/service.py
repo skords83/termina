@@ -99,6 +99,7 @@ def reset_password(db: Session, user: User) -> str:
     temp_password = generate_temp_password()
     user.password_hash = hash_password(temp_password)
     user.must_change_password = True
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete()
     user.failed_login_attempts = 0
     user.locked_until = None
     db.commit()
@@ -108,6 +109,7 @@ def reset_password(db: Session, user: User) -> str:
 def change_password(db: Session, user: User, new_password: str) -> None:
     user.password_hash = hash_password(new_password)
     user.must_change_password = False
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete()
     db.commit()
 
 

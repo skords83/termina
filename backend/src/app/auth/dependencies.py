@@ -13,7 +13,7 @@ def _unauthorized() -> HTTPException:
     return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Nicht angemeldet")
 
 
-def get_current_user(
+def get_authenticated_user(
     db: Session = Depends(get_db),
     session_token: str | None = Cookie(default=None, alias=settings.session_cookie_name),
 ) -> User:
@@ -39,6 +39,12 @@ def get_current_user(
     session.expires_at = now + ttl
     db.commit()
 
+    return user
+
+
+def get_current_user(user: User = Depends(get_authenticated_user)) -> User:
+    if user.must_change_password:
+        raise HTTPException(status_code=403, detail="Bitte zuerst das Passwort ändern")
     return user
 
 

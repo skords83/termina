@@ -10,7 +10,7 @@ import {
   useSensors,
   pointerWithin,
 } from '@dnd-kit/core';
-import { useStore } from './store';
+import { useStore, AuthUser } from './store';
 import { useCalendars } from './hooks/useCalendars';
 import { useEvents } from './hooks/useEvents';
 import { LoginForm } from './components/LoginForm';
@@ -129,8 +129,7 @@ interface PendingResize {
 }
 
 export default function App() {
-  const { user, setUser, clearUser, activeMonth, setActiveMonth, hiddenCalendars, isCalendarVisible } =
-    useStore();
+  const { user, setUser, clearUser } = useStore();
 
   const [authLoading, setAuthLoading] = useState(true);
 
@@ -144,12 +143,31 @@ export default function App() {
 
   async function handleLogout() {
     try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-    } finally {
+      const response = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      if (!response.ok) throw new Error('Logout failed');
       clearUser();
+    } catch {
+      alert('Abmelden fehlgeschlagen. Bitte erneut versuchen.');
     }
   }
 
+  if (authLoading) {
+    return null;
+  }
+
+  if (!user) {
+    return <LoginForm onSuccess={setUser} />;
+  }
+
+  if (user.must_change_password) {
+    return <ChangePasswordForm user={user} onSuccess={setUser} onLogout={handleLogout} />;
+  }
+
+  return <CalendarApp key={user.id} user={user} handleLogout={handleLogout} />;
+}
+
+function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () => Promise<void> }) {
+  const { activeMonth, setActiveMonth, hiddenCalendars, isCalendarVisible } = useStore();
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [anchorPos, setAnchorPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [editModal, setEditModal] = useState<CalendarEvent | null>(null);
@@ -685,18 +703,6 @@ export default function App() {
     const { event, newEnd } = pendingResize;
     setPendingResize(null);
     executeResize(event, mode, newEnd);
-  }
-
-  if (authLoading) {
-    return null;
-  }
-
-  if (!user) {
-    return <LoginForm onSuccess={setUser} />;
-  }
-
-  if (user.must_change_password) {
-    return <ChangePasswordForm user={user} onSuccess={setUser} onLogout={handleLogout} />;
   }
 
   return (

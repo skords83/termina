@@ -29,7 +29,8 @@ class Event(Base):
         Index("ix_events_start", "start"),
     )
 
-    uid: Mapped[str] = mapped_column(String, primary_key=True)
+    uid: Mapped[str] = mapped_column(String, primary_key=True)  # internal API identity
+    remote_uid: Mapped[str | None] = mapped_column(String, nullable=True)
     calendar_id: Mapped[str] = mapped_column(
         String, ForeignKey("calendars.id", ondelete="CASCADE"), nullable=False
     )

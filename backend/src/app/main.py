@@ -40,6 +40,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def private_responses(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith(("/api/", "/public/")):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 app.include_router(auth_router.router, prefix="/api")
 app.include_router(admin_users.router, prefix="/api")
 app.include_router(calendars.router, prefix="/api")

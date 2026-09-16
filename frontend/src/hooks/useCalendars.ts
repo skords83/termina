@@ -14,14 +14,26 @@ export function useCalendars(enabled: boolean): Result {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setCalendars([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
 
-    apiFetch<Calendar[]>('/api/calendars')
-      .then(setCalendars)
-      .catch((err: ApiError) => setError(err.message))
-      .finally(() => setLoading(false));
+    apiFetch<Calendar[]>('/api/calendars', undefined, controller.signal)
+      .then((data) => { if (!controller.signal.aborted) setCalendars(data); })
+      .catch((err: ApiError) => {
+        if (!controller.signal.aborted) {
+          setCalendars([]);
+          setError(err.message);
+        }
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, [enabled]);
 
   return { calendars, loading, error };

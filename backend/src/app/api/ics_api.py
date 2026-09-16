@@ -23,6 +23,7 @@ from app.ics import IcsImportError, annotate_import_conflicts, build_export_cale
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+MAX_IMPORT_BYTES = 1024 * 1024
 
 
 def _safe_filename(summary: str | None) -> str:
@@ -95,7 +96,7 @@ def export_ics_event(
 
 
 @router.post("/ics/import/preview")
-async def import_ics_preview(
+def import_ics_preview(
     calendar_id: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -103,7 +104,9 @@ async def import_ics_preview(
 ):
     service.ensure_calendar_access(db, user, calendar_id)
 
-    data = await file.read()
+    data = file.file.read(MAX_IMPORT_BYTES + 1)
+    if len(data) > MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=413, detail="ICS-Datei darf höchstens 1 MiB groß sein")
     if not data:
         raise HTTPException(status_code=400, detail="Datei ist leer")
 
@@ -123,7 +126,7 @@ async def import_ics_preview(
 
 
 @router.post("/ics/import")
-async def import_ics(
+def import_ics(
     background: BackgroundTasks,
     calendar_id: str = Form(...),
     file: UploadFile = File(...),
@@ -132,7 +135,9 @@ async def import_ics(
 ):
     service.ensure_calendar_access(db, user, calendar_id)
 
-    data = await file.read()
+    data = file.file.read(MAX_IMPORT_BYTES + 1)
+    if len(data) > MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=413, detail="ICS-Datei darf höchstens 1 MiB groß sein")
     if not data:
         raise HTTPException(status_code=400, detail="Datei ist leer")
 

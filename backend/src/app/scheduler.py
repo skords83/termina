@@ -17,7 +17,6 @@ def start_scheduler() -> None:
         trigger=IntervalTrigger(seconds=settings.sync_interval_seconds),
         id="caldav_sync",
         replace_existing=True,
-        next_run_time=None,  # overridden below to run immediately
     )
     _scheduler.start()
     logger.info(

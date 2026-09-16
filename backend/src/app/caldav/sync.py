@@ -1,7 +1,7 @@
 import logging
 import threading
 import zoneinfo
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from typing import Any
 
 from icalendar import Calendar as ICalendar
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.caldav.client import get_caldav_client
 from app.db import session as db_session
 from app.db.models import Calendar, Event, EventOverride, EventShare, EventShareInstanceState
+from app.db.identity import event_identity
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ _DISCOVERY_BODY = """<?xml version="1.0" encoding="utf-8"?>
 </d:propfind>"""
 
 
-def _discover_calendars(client: Any) -> list[dict]:
+def _discover_calendars(client: Any) -> list[dict] | None:
     """
     Eigenes PROPFIND auf den Kalender-Root — gibt cal:calendar UND
     cs:subscribed zurück. Die caldav-Lib filtert subscribed heraus,
@@ -139,6 +140,14 @@ def _discover_calendars(client: Any) -> list[dict]:
         return None
 
     tree = etree.fromstring(raw_xml, _XML_PARSER)
+    if tree is None or tree.tag != f"{{{NS_DAV}}}multistatus":
+        logger.error("Invalid calendar discovery response; retaining local calendars")
+        return None
+    # Recovery is necessary for OxiCloud's malformed color namespace, but a
+    # recovered document must never authorize deleting unseen calendars.
+    discovery_complete = not bool(_XML_PARSER.error_log)
+    if not tree.findall("d:response", NS):
+        return None
 
     calendars = []
     for response in tree.findall("d:response", NS):
@@ -193,6 +202,7 @@ def _discover_calendars(client: Any) -> list[dict]:
         calendars.append(
             {
                 "url": full_url,
+                "discovery_complete": discovery_complete,
                 "name": displayname,
                 "color": color,
                 "ctag": ctag,
@@ -207,6 +217,8 @@ def _discover_calendars(client: Any) -> list[dict]:
             f" [subscribed: {source_url}]" if is_subscribed else "",
         )
 
+    if not calendars and not discovery_complete:
+        return None
     logger.info("Discovered %d calendars", len(calendars))
     return calendars
 
@@ -231,6 +243,19 @@ def _parse_dt(value) -> tuple[datetime | None, bool]:
     if isinstance(value, date):
         return datetime(value.year, value.month, value.day), True
     return None, False
+
+
+def _component_end(component):
+    end = component.get("DTEND")
+    if end is not None:
+        return end.dt
+    start = component.get("DTSTART")
+    if start is None:
+        return None
+    duration = component.get("DURATION")
+    if duration is not None:
+        return start.dt + duration.dt
+    return start.dt + (timedelta(days=1) if not isinstance(start.dt, datetime) else timedelta(0))
 
 
 def _infer_all_day(
@@ -292,15 +317,18 @@ def _propfind_etags(client, cal_url: str) -> dict[str, str]:
     etags: dict[str, str] = {}
     try:
         raw_xml = resp.raw if isinstance(resp.raw, bytes) else resp.raw.encode()
-        tree = etree.fromstring(raw_xml, _XML_PARSER)
+        tree = etree.fromstring(raw_xml)
     except Exception as exc:
         logger.warning("Could not parse PROPFIND response for %s: %s", cal_url, exc)
-        return etags
+        raise ValueError("Invalid CalDAV object listing") from exc
 
     from urllib.parse import urlparse
 
     host = _host_url(client)
     cal_path = urlparse(cal_url).path.rstrip("/")
+
+    if tree.tag != f"{{{NS_DAV}}}multistatus":
+        raise ValueError("Expected CalDAV multistatus response")
 
     for response in tree.findall("d:response", NS):
         href = response.findtext("d:href", namespaces=NS) or ""
@@ -328,7 +356,8 @@ def _multiget_ical(client, cal_url: str, urls: list[str]) -> dict[str, tuple[str
     host = _host_url(client)
 
     # Build <d:href> elements — path-only hrefs
-    hrefs_xml = "\n  ".join(f"<d:href>{urlparse(url).path}</d:href>" for url in urls)
+    from xml.sax.saxutils import escape
+    hrefs_xml = "\n  ".join(f"<d:href>{escape(urlparse(url).path)}</d:href>" for url in urls)
     body = _MULTIGET_TMPL.format(hrefs=hrefs_xml)
 
     resp = client.report(url=cal_url, query=body, depth=1)
@@ -336,10 +365,13 @@ def _multiget_ical(client, cal_url: str, urls: list[str]) -> dict[str, tuple[str
     result: dict[str, tuple[str, str]] = {}
     try:
         raw_xml = resp.raw if isinstance(resp.raw, bytes) else resp.raw.encode()
-        tree = etree.fromstring(raw_xml, _XML_PARSER)
+        tree = etree.fromstring(raw_xml)
     except Exception as exc:
         logger.error("Could not parse MULTIGET response for %s: %s", cal_url, exc)
-        return result
+        raise ValueError("Invalid CalDAV multiget response") from exc
+
+    if tree.tag != f"{{{NS_DAV}}}multistatus":
+        raise ValueError("Expected CalDAV multistatus response")
 
     for response in tree.findall("d:response", NS):
         href = response.findtext("d:href", namespaces=NS) or ""
@@ -366,13 +398,13 @@ def _upsert_event(
     obj_url: str,
     local_events: dict[str, "Event"],
     seen_uids: set[str],
-) -> None:
+) -> bool:
     """Parst eine .ics-Datei und schreibt Master + Overrides in die DB."""
     try:
         ical = ICalendar.from_ical(raw)
     except Exception as exc:
         logger.warning("Could not parse iCal for %s: %s", obj_url, exc)
-        return
+        return False
 
     master_uid: str | None = None
     master_component: Any = None
@@ -390,11 +422,13 @@ def _upsert_event(
 
     if master_component is None or master_uid is None:
         logger.warning("No master VEVENT in %s, skipping", obj_url)
-        return
+        return False
 
+    remote_uid = master_uid
+    master_uid = event_identity(db, cal_url, remote_uid)
     seen_uids.add(master_uid)
 
-    existing = local_events.get(master_uid)
+    existing = local_events.get(master_uid) or db.get(Event, master_uid)
     if existing and existing.etag == remote_etag:
         # Normaler Fall: Event unverändert → überspringen.
         # Ausnahme: Event wurde mit falschem all_day=False + 02:00 Uhr gespeichert
@@ -408,7 +442,7 @@ def _upsert_event(
             and existing.start.second == 0
         )
         if not wrongly_timed:
-            return
+            return True
 
     summary = str(master_component.get("SUMMARY", "")) or None
     location = str(master_component.get("LOCATION", "")) or None
@@ -420,12 +454,12 @@ def _upsert_event(
     start_val = start_raw.dt if start_raw else None
     start_dt, all_day = _parse_dt(start_val)
 
-    end_raw = master_component.get("DTEND") or master_component.get("DURATION")
-    end_val = end_raw.dt if end_raw else None
+    end_val = _component_end(master_component)
     end_dt, _ = _parse_dt(end_val)
     all_day = _infer_all_day(start_dt, end_dt, all_day)
 
     if existing:
+        existing.remote_uid = remote_uid
         existing.etag = remote_etag
         existing.summary = summary
         existing.start = start_dt
@@ -439,6 +473,7 @@ def _upsert_event(
         db.add(
             Event(
                 uid=master_uid,
+                remote_uid=remote_uid,
                 calendar_id=cal_url,
                 etag=remote_etag,
                 summary=summary,
@@ -461,7 +496,7 @@ def _upsert_event(
     overrides_by_rid: dict[Any, dict[str, Any]] = {}
 
     for ov_uid, rid_dt, ov_comp in override_components:
-        if ov_uid != master_uid:
+        if ov_uid != remote_uid:
             continue
         rid_norm, _ = _parse_dt(rid_dt)
         if rid_norm is None:
@@ -469,8 +504,7 @@ def _upsert_event(
         ov_start_raw = ov_comp.get("DTSTART")
         ov_start_val = ov_start_raw.dt if ov_start_raw else None
         ov_start_dt, _ = _parse_dt(ov_start_val)
-        ov_end_raw = ov_comp.get("DTEND")
-        ov_end_val = ov_end_raw.dt if ov_end_raw else None
+        ov_end_val = _component_end(ov_comp)
         ov_end_dt, _ = _parse_dt(ov_end_val)
         overrides_by_rid[rid_norm] = {
             "master_uid": master_uid,
@@ -524,6 +558,7 @@ def _upsert_event(
             },
         )
         db.execute(upsert_stmt)
+    return True
 
 
 def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
@@ -624,6 +659,8 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
         if rid_prop is not None:
             continue
 
+        remote_uid = uid
+        uid = event_identity(db, cal_url, remote_uid)
         seen_uids.add(uid)
 
         summary = str(component.get("SUMMARY", "")) or None
@@ -636,12 +673,11 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
         start_val = start_raw.dt if start_raw else None
         start_dt, all_day = _parse_dt(start_val)
 
-        end_raw = component.get("DTEND") or component.get("DURATION")
-        end_val = end_raw.dt if end_raw else None
+        end_val = _component_end(component)
         end_dt, _ = _parse_dt(end_val)
         all_day = _infer_all_day(start_dt, end_dt, all_day)
 
-        existing = local_events.get(uid)
+        existing = local_events.get(uid) or db.get(Event, uid)
         if existing:
             existing.summary = summary
             existing.start = start_dt
@@ -655,6 +691,7 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
             db.add(
                 Event(
                     uid=uid,
+                    remote_uid=remote_uid,
                     calendar_id=cal_url,
                     etag=None,
                     summary=summary,
@@ -667,6 +704,7 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
                     raw_ical="",
                 )
             )
+        db.flush()
         upserted += 1
 
     # Gelöschte Events entfernen
@@ -676,6 +714,7 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
             db.query(EventOverride).filter(EventOverride.master_uid == uid).delete(
                 synchronize_session=False
             )
+            _cleanup_orphaned_event_shares(db, uid)
             db.delete(event)
             deleted_count += 1
 
@@ -766,6 +805,8 @@ def _sync_ics_feed(db: Session, feed: dict) -> None:
         if not uid or component.get("RECURRENCE-ID") is not None:
             continue
 
+        remote_uid = uid
+        uid = event_identity(db, feed_id, remote_uid)
         seen_uids.add(uid)
         summary = str(component.get("SUMMARY", "")) or None
         location = str(component.get("LOCATION", "")) or None
@@ -775,11 +816,10 @@ def _sync_ics_feed(db: Session, feed: dict) -> None:
 
         start_raw = component.get("DTSTART")
         start_dt, all_day = _parse_dt(start_raw.dt if start_raw else None)
-        end_raw = component.get("DTEND") or component.get("DURATION")
-        end_dt, _ = _parse_dt(end_raw.dt if end_raw else None)
+        end_dt, _ = _parse_dt(_component_end(component))
         all_day = _infer_all_day(start_dt, end_dt, all_day)
 
-        existing = local_events.get(uid)
+        existing = local_events.get(uid) or db.get(Event, uid)
         if existing:
             existing.summary = summary
             existing.start = start_dt
@@ -791,6 +831,7 @@ def _sync_ics_feed(db: Session, feed: dict) -> None:
         else:
             db.add(Event(
                 uid=uid,
+                remote_uid=remote_uid,
                 calendar_id=feed_id,
                 etag=None,
                 summary=summary,
@@ -802,6 +843,7 @@ def _sync_ics_feed(db: Session, feed: dict) -> None:
                 description=description,
                 raw_ical="",
             ))
+        db.flush()
         upserted += 1
 
     deleted_count = 0
@@ -810,6 +852,7 @@ def _sync_ics_feed(db: Session, feed: dict) -> None:
             db.query(EventOverride).filter(EventOverride.master_uid == uid).delete(
                 synchronize_session=False
             )
+            _cleanup_orphaned_event_shares(db, uid)
             db.delete(event)
             deleted_count += 1
 
@@ -868,15 +911,13 @@ def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
     local_events: dict[str, Event] = {
         e.uid: e for e in db.query(Event).filter(Event.calendar_id == cal_url).all()
     }
-    local_etag_to_uid: dict[str, str] = {
-        e.etag: e.uid for e in local_events.values() if e.etag
-    }
+    local_etags = {e.etag for e in local_events.values() if e.etag}
 
     urls_to_fetch: list[str] = []
     unchanged_etags: set[str] = set()
 
     for url, remote_etag in remote_etags.items():
-        if remote_etag and remote_etag in local_etag_to_uid:
+        if remote_etag and remote_etag in local_etags:
             unchanged_etags.add(remote_etag)
         else:
             urls_to_fetch.append(url)
@@ -891,11 +932,16 @@ def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
     # ── 4. MULTIGET — nur neue/geänderte URLs, 1 Request ─────────────────────
     seen_uids: set[str] = set()
 
+    complete = True
     if urls_to_fetch:
         try:
             fetched = _multiget_ical(client, cal_url, urls_to_fetch)
         except Exception as exc:
             logger.error("MULTIGET failed for %s: %s", cal_url, exc)
+            return
+
+        if set(fetched) != set(urls_to_fetch):
+            logger.warning("Incomplete MULTIGET for %s; retaining local data and CTag", cal_url)
             return
 
         for obj_url, (remote_etag, raw) in fetched.items():
@@ -905,17 +951,22 @@ def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
             # (z.B. ein Termin, der gerade erst neu angelegt wurde).
             try:
                 with db.begin_nested():
-                    _upsert_event(
+                    if not _upsert_event(
                         db, cal_url, remote_etag, raw, obj_url, local_events, seen_uids
-                    )
+                    ):
+                        complete = False
             except Exception as exc:
+                complete = False
                 logger.error("Upsert failed for %s in %s: %s", obj_url, cal_url, exc)
 
     # Unveränderte Events als "gesehen" markieren (nicht löschen!)
-    for etag in unchanged_etags:
-        uid = local_etag_to_uid.get(etag)
-        if uid:
-            seen_uids.add(uid)
+    if not complete:
+        db.commit()  # Keep valid updates, but retry failed resources on the next run.
+        return
+
+    for event in local_events.values():
+        if event.etag in unchanged_etags:
+            seen_uids.add(event.uid)
 
     # ── 5. Gelöschte Events entfernen ─────────────────────────────────────────
     deleted_count = 0
@@ -1002,7 +1053,7 @@ def _run_sync_locked() -> None:
         # Kalender entfernen die weder im CalDAV-Server noch in den ICS-Feeds/Geburtstagen
         # vorhanden sind. Nur wenn Discovery erfolgreich war — sonst würden alle
         # CalDAV-Kalender fälschlich als gelöscht gewertet.
-        if discovery_ok:
+        if discovery_ok and all(c.get("discovery_complete", True) for c in calendars):
             existing_cals = db.query(Calendar).all()
             for db_cal in existing_cals:
                 if (

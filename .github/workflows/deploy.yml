@@ -1,12 +1,36 @@
 name: Build and Push Docker Images
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches:
       - main
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci && npm test && npm run build && npm audit --audit-level=moderate
+        working-directory: frontend
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.14'
+          python-version: '3.12'
+      - run: uv sync --locked && uv run --locked pytest -q
+        working-directory: backend
+
   build:
+    needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,7 +58,6 @@ jobs:
           context: ./frontend
           push: true
           tags: ${{ env.IMAGE_PREFIX }}/frontend:latest
-          build-args: VITE_API_BASE_URL=/api
           no-cache: true
 
       - name: Build and push backend

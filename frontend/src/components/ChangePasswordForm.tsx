@@ -16,7 +16,10 @@ export function ChangePasswordForm({ user, onSuccess, onLogout }: Props) {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!newPassword) return;
+    if (newPassword.length < 12 || newPassword.length > 1024) {
+      setError('Das Passwort muss zwischen 12 und 1024 Zeichen lang sein.');
+      return;
+    }
     if (newPassword !== confirmPassword) {
       setError('Passwörter stimmen nicht überein.');
       return;
@@ -87,7 +90,10 @@ export function ChangePasswordForm({ user, onSuccess, onLogout }: Props) {
           <input
             type="password"
             className="login-input"
-            placeholder="Neues Passwort"
+            placeholder="Neues Passwort (mindestens 12 Zeichen)"
+            minLength={12}
+            maxLength={1024}
+            required
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             autoFocus={user.must_change_password}

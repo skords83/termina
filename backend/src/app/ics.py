@@ -67,12 +67,14 @@ def build_export_calendar(
     cal.add("prodid", "-//Termina//termina//EN")
     cal.add("version", "2.0")
 
+    multiple_calendars = len({event.calendar_id for event in events}) > 1
     for event in events:
         if event.start is None:
             continue
 
         ev = ICalEvent()
-        ev.add("uid", event.uid)
+        export_uid = event.uid if multiple_calendars else (event.remote_uid or event.uid)
+        ev.add("uid", export_uid)
         ev.add("summary", event.summary or "")
         ev.add("dtstamp", datetime.now(timezone.utc))
         _add_dt(ev, "dtstart", event.start, event.all_day)
@@ -100,7 +102,7 @@ def build_export_calendar(
                     continue
 
                 ov_ev = ICalEvent()
-                ov_ev.add("uid", event.uid)
+                ov_ev.add("uid", export_uid)
                 ov_ev.add("dtstamp", datetime.now(timezone.utc))
                 _add_dt(ov_ev, "recurrence-id", ov.recurrence_id, event.all_day)
                 _add_dt(ov_ev, "dtstart", ov.start, event.all_day)
@@ -138,7 +140,10 @@ def _group_vevents_by_uid(data: bytes) -> tuple[dict[str, list[Any]], list[str]]
 
     groups: dict[str, list[Any]] = {}
     order: list[str] = []
-    for component in parsed.walk("VEVENT"):
+    components = parsed.walk("VEVENT")
+    if len(components) > 500:
+        raise IcsImportError("Höchstens 500 Termine inklusive Serienausnahmen pro Import erlaubt")
+    for component in components:
         uid = str(component.get("UID", "")).strip()
         if not uid:
             continue
@@ -199,7 +204,8 @@ def parse_ics_preview(data: bytes) -> list[dict[str, Any]]:
         all_day = start_val is not None and not isinstance(start_val, datetime) and isinstance(start_val, date)
 
         dtend = master.get("DTEND")
-        end_val = dtend.dt if dtend else None
+        duration = master.get("DURATION")
+        end_val = dtend.dt if dtend else (start_val + duration.dt if start_val is not None and duration else None)
 
         previews.append({
             "summary": str(master.get("SUMMARY", "")).strip() or "(ohne Titel)",

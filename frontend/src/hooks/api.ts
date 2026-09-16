@@ -6,7 +6,8 @@ export class ApiError extends Error {
 
 export async function apiFetch<T>(
   path: string,
-  params?: Record<string, string>
+  params?: Record<string, string>,
+  signal?: AbortSignal
 ): Promise<T> {
   const url = new URL(path, window.location.origin);
   if (params) {
@@ -15,6 +16,8 @@ export async function apiFetch<T>(
 
   const res = await fetch(url.toString(), {
     credentials: 'include',
+    cache: 'no-store',
+    signal,
   });
 
   if (!res.ok) {

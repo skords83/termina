@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useOptimisticStore } from './eventsSlice';
+import { useHistoryStore } from './historySlice';
 
 export interface AuthUser {
   id: number;
@@ -33,8 +35,18 @@ export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
       user: null,
-      setUser: (user) => set({ user }),
-      clearUser: () => set({ user: null }),
+      setUser: (user) => {
+        if (get().user?.id !== user.id) {
+          useOptimisticStore.getState().clearAll();
+          useHistoryStore.getState().clear();
+        }
+        set({ user });
+      },
+      clearUser: () => {
+        useOptimisticStore.getState().clearAll();
+        useHistoryStore.getState().clear();
+        set({ user: null, hiddenCalendars: new Set() });
+      },
 
       activeMonth: firstOfMonth(new Date()),
       setActiveMonth: (month) => set({ activeMonth: month }),
@@ -56,7 +68,7 @@ export const useStore = create<AppState>()(
       merge: (persisted: any, current) => ({
         ...current,
         ...persisted,
-        hiddenCalendars: new Set<string>(persisted.hiddenCalendars ?? []),
+        hiddenCalendars: new Set<string>(persisted?.hiddenCalendars ?? []),
       }),
     }
   )

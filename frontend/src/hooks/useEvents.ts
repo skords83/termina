@@ -19,14 +19,26 @@ export function useEvents(
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setEvents([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
 
-    apiFetch<CalendarEvent[]>('/api/events', { from, to })
-      .then(setEvents)
-      .catch((err: ApiError) => setError(err.message))
-      .finally(() => setLoading(false));
+    apiFetch<CalendarEvent[]>('/api/events', { from, to }, controller.signal)
+      .then((data) => { if (!controller.signal.aborted) setEvents(data); })
+      .catch((err: ApiError) => {
+        if (!controller.signal.aborted) {
+          setEvents([]);
+          setError(err.message);
+        }
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, [enabled, from, to, nonce]);
 
   return { events, loading, error };

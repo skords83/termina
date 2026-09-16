@@ -449,6 +449,9 @@ def move_event_calendar(
         if current_etag and etag and current_etag != etag:
             raise ConflictError(f"ETag-Konflikt für Event {uid}")
 
+        if _find_caldav_event(new_cal, uid) is not None:
+            raise ConflictError("Im Zielkalender existiert bereits ein Termin mit dieser UID")
+
         ical_data = _make_ical(uid, summary, start, end, all_day, location, description, rrule=None)
 
         _caldav_op_with_retry(

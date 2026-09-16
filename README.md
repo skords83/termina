@@ -1,82 +1,57 @@
 # Termina
 
-Selbst gehosteter Kalender, der gegen eine Nextcloud per CalDAV im Hintergrund synct
-und als PWA im Browser nutzbar ist.
+Selbst gehosteter Familienkalender mit CalDAV-Synchronisation, Benutzerkonten,
+Serienterminen, ICS-Import/-Export und optionalem öffentlichen Kalender-Abo.
 
-## Architektur
-
-```
-[Nextcloud CalDAV]  <-->  [Backend (FastAPI + SQLite)]  <-->  [Frontend (React PWA)]
-```
-
-- **Backend (Python / FastAPI)** pollt Nextcloud regelmaessig, cached Termine in SQLite,
-  und stellt eine schmale REST-API bereit.
-- **Frontend (React + Vite + TypeScript)** redet ausschliesslich mit dem Backend.
-  Damit umgehen wir CORS, der Sync laeuft auch bei geschlossenem Browser,
-  und die CalDAV-Credentials liegen nur auf dem Server.
-
-## Quick Start
+## Lokal starten
 
 ```sh
 cp .env.example .env
-# .env editieren: NEXTCLOUD_URL, NEXTCLOUD_USERNAME, NEXTCLOUD_APP_PASSWORD setzen
-# und API_TOKEN auf einen zufaelligen Wert aendern (z.B. `openssl rand -hex 32`)
+# CALDAV_URL, CALDAV_USERNAME, CALDAV_PASSWORD und INITIAL_ADMIN_PASSWORD setzen.
 docker compose up --build
 ```
 
-- Backend:  http://localhost:8000  (Health-Check: `/healthz`)
-- Frontend: http://localhost:5173
+Frontend: http://localhost:5173. Backend: http://localhost:8000/healthz.
+Die Entwicklungsports sind nur an localhost gebunden. Das Frontend leitet
+API-Aufrufe über den Vite-Proxy an den Backend-Container weiter.
+Beim ersten Start wird der konfigurierte Admin angelegt; vor dem Kalenderzugriff
+muss er ein neues Passwort mit mindestens 12 Zeichen setzen.
 
-## Projektstruktur
+## Produktion
 
-```
-backend/
-  src/app/
-    main.py           FastAPI-Einstieg
-    config.py         Settings aus .env (pydantic-settings)
-    db/               SQLAlchemy (Phase 1)
-    caldav/           Nextcloud-Client + Sync-Worker (Phase 1)
-    api/              REST-Endpoints (Phase 2)
-    scheduler.py      APScheduler (Phase 1)
-  tests/
-  pyproject.toml
-  Dockerfile
+`docker-compose.prod.yml` verwendet die veröffentlichten Images. HTTPS am
+Reverse-Proxy bereitstellen und `COOKIE_SECURE=true` setzen. Die übrigen
+Einstellungen entsprechen `.env.example`; zusätzliche Feed- und Freigabeoptionen
+stehen in `backend/.env.example`. Keine Beispielpasswörter verwenden.
+Die SQLite-Datenbank liegt im persistenten Volume unter `/data/termina.db`.
+Vor Updates das Datenvolume sichern. Schema-Ergänzungen erfolgen beim Start;
+der erste Sync nach der Identitätsmigration liest alle Termine erneut ein.
 
-frontend/
-  src/
-    main.tsx
-    App.tsx
-    index.css
-  index.html
-  package.json
-  vite.config.ts
-  tsconfig.json
-  Dockerfile
+Private Kalenderdaten werden nicht offline gespeichert. Beim Abmelden werden
+Ansicht und Undo-Verlauf verworfen. Passwort-Reset und Passwortwechsel widerrufen
+bestehende Sitzungen; nach dem eigenen Passwortwechsel wird eine neue Sitzung gesetzt.
+ICS-Importe sind auf 1 MiB und 500 VEVENTs (inklusive Serienausnahmen) begrenzt.
 
-data/                 SQLite-Datei (auf dem Host persistiert)
-docker-compose.yml
-.env.example
-```
+## Entwicklung und Tests
 
-## Roadmap
-
-- [x] **Phase 0** - Grundgeruest (Repo, Docker, "Hello World")
-- [ ] **Phase 1** - CalDAV-Sync mit CTag/ETag, Background-Polling
-- [ ] **Phase 2** - REST-API (`/calendars`, `/events`)
-- [ ] **Phase 3** - Monatsansicht im Frontend
-- [ ] **Phase 4** - PWA + Polish (Manifest, Service Worker, Dark Mode)
-- [ ] danach: Write-Sync (Erstellen/Bearbeiten/Loeschen), weitere Ansichten,
-      Wiederholungen (RRULE), Tasks (VTODO), Push-Benachrichtigungen,
-      Kontaktgeburtstage via CardDAV.
-
-## Phase 0 Smoke-Test
-
-Wenn beide Container laufen, sollte gelten:
+Node.js 24 und uv 0.12.14 werden auch in CI/Docker verwendet.
 
 ```sh
-curl http://localhost:8000/healthz
-# {"status":"ok"}
+cd frontend
+npm ci
+npm test
+npm run build
+npm audit
 ```
 
-Und im Browser unter http://localhost:5173 erscheint eine Seite, die "Backend-Status: ok"
-anzeigt - das beweist, dass Frontend und Backend miteinander reden.
+```sh
+cd backend
+uv sync --locked
+uv run --locked pytest -q
+```
+
+Für Backend-Entwicklung außerhalb von Docker `backend/.env.example` nach
+`backend/.env` kopieren und Zugangsdaten setzen. Vite verwendet lokal Port 8000;
+`API_PROXY_TARGET` kann das Ziel überschreiben. Die Images verwenden die
+versionierten Lockfiles. Tests, Build und npm-Audit müssen vor Veröffentlichung
+und Deployment erfolgreich sein.
