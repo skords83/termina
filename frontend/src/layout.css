@@ -306,14 +306,14 @@
   color: var(--text-3);
 }
 
-/* Sidebar Actions (Import/Sync, Nutzerverwaltung, Abmelden) */
+/* Sidebar footer: sync status and actions */
+.sidebar-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
+.sidebar-sync-status { padding: 0 6px 8px; color: var(--text-2); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.sidebar-sync-status time { color: var(--text-3); font-variant-numeric: tabular-nums; }
 .sidebar-actions {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-top: auto;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
 }
 .sidebar-actions .toolbar-btn:hover {
   background: var(--bg-hover);
@@ -333,7 +333,9 @@
   .mini-cal, .cal-list-label { display: none; }
   .cal-list { display: flex; overflow-x: auto; gap: 8px; }
   .cal-item { width: auto; flex-shrink: 0; }
-  .sidebar-actions { margin: 0; padding: 0; border: 0; justify-content: flex-end; }
+  .sidebar-footer { margin: 0; padding: 0; border: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .sidebar-sync-status { padding: 0; }
+  .sidebar-actions { flex-shrink: 0; margin: 0; padding: 0; border: 0; justify-content: flex-end; }
   .month-header, .month-grid { grid-template-columns: 24px repeat(7, minmax(0, 1fr)); }
   .month-weekday { padding: 8px 3px; }
   .day-cell { padding: 4px 2px; }

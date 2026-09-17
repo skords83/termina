@@ -758,7 +758,6 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
             {eventsLoading && <span className="sync-indicator" title="Lädt…" />}
           </div>
         </header>
-        <div className="sync-status" role="status">{syncError || syncStatus?.error || (syncing ? "Synchronisation läuft …" : syncStatus?.last_success_at ? `Synchronisiert: ${new Date(syncStatus.last_success_at).toLocaleString("de-DE")}` : "Noch keine erfolgreiche Synchronisation")} <button type="button" onClick={handleSync} disabled={syncing}>Synchronisieren</button></div>
         {showSettings && <SettingsDialog user={user} calendars={calendars} onClose={() => setShowSettings(false)} onSaved={setView} />}
 
         <div className="main">
@@ -767,6 +766,8 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
             onImportExport={() => setShowImportExport(true)}
             onSync={handleSync}
             syncing={syncing}
+            syncError={syncError || syncStatus?.error || null}
+            lastSyncedAt={syncStatus?.last_success_at ?? null}
             isAdmin={user.role === 'admin'}
             onShowAdmin={() => setShowAdmin(true)}
             onLogout={handleLogout}
