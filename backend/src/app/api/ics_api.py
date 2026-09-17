@@ -12,6 +12,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from sqlalchemy.orm import Session
 
+from app.activity import record
 from app.auth import service
 from app.auth.dependencies import get_current_user
 from app.caldav.sync import run_sync
@@ -151,6 +152,8 @@ def import_ics(
     for new_uid, ical_bytes in groups:
         try:
             import_ical_object(calendar_id, ical_bytes)
+            previews = parse_ics_preview(ical_bytes)
+            record(db, user, calendar_id, new_uid, "import", None, {**(previews[0] if previews else {}), "calendar_id": calendar_id})
             imported += 1
         except CalDAVTimeoutError as e:
             raise HTTPException(

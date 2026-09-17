@@ -18,6 +18,7 @@ import { ChangePasswordForm } from './components/ChangePasswordForm';
 import AdminUsersPage from './components/AdminUsersPage';
 import { SettingsDialog } from './components/SettingsDialog';
 import { useSyncStatus } from './hooks/useSyncStatus';
+import { ActivityDialog } from './components/ActivityDialog';
 import { Sidebar } from './components/Sidebar';
 import { MonthView } from './components/MonthView';
 import { EventPopup } from './components/EventPopup';
@@ -183,6 +184,7 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
   const [showNatural, setShowNatural] = useState(false);
   const { syncing, sync: handleSync, status: syncStatus, error: syncError } = useSyncStatus();
   const [showSettings, setShowSettings] = useState(false);
+  const [showActivity, setShowActivity] = useState(false);
 
   // DnD-State
   const [activeDrag, setActiveDrag] = useState<CalendarEvent | null>(null);
@@ -371,7 +373,7 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const inInput = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
-      const anyModalOpen = !!document.querySelector('.settings-dialog[open], .natural-overlay, .event-form-overlay, .search-overlay, .event-popup, .recurring-move-overlay, .modal-backdrop');
+      const anyModalOpen = !!document.querySelector('.activity-dialog[open], .settings-dialog[open], .natural-overlay, .event-form-overlay, .search-overlay, .event-popup, .recurring-move-overlay, .modal-backdrop');
 
       // ⌘K → Suche (funktioniert auch aus Inputs)
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -758,12 +760,14 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
             {eventsLoading && <span className="sync-indicator" title="Lädt…" />}
           </div>
         </header>
+        {showActivity && <ActivityDialog calendars={calendars} onClose={() => setShowActivity(false)} />}
         {showSettings && <SettingsDialog user={user} calendars={calendars} onClose={() => setShowSettings(false)} onSaved={setView} />}
 
         <div className="main">
           <Sidebar
             calendars={calendars}
             onImportExport={() => setShowImportExport(true)}
+            onShowActivity={() => setShowActivity(true)}
             onSync={handleSync}
             syncing={syncing}
             syncError={syncError || syncStatus?.error || null}

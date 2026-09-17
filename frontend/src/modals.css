@@ -1286,3 +1286,9 @@
   transition: color 0.15s, border-color 0.15s;
 }
 .admin-reset-btn:hover { color: var(--text); border-color: var(--text-3); }
+.recurrence-fields { display: grid; gap: 10px; border: 0; padding: 12px 0; min-width: 0; }
+.recurrence-interval { display: flex; align-items: center; gap: 10px; }
+.recurrence-interval input { max-width: 100px; }
+.recurrence-days { display: flex; flex-wrap: wrap; gap: 12px; }
+.recurrence-days label { display: flex; align-items: center; gap: 4px; }
+.recurrence-fields input[type=checkbox] { accent-color: var(--accent); }

@@ -24,10 +24,11 @@ def _dt_to_iso(dt: datetime | None, all_day: bool) -> str | None:
     return dt.replace(tzinfo=_BERLIN).isoformat()
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Annotated
 from sqlalchemy.orm import Session
 
+from app.activity import Change, record, prepare_trash, snapshot
 from app.auth import service
 from app.auth.dependencies import get_current_user
 from app.caldav.write import (
@@ -64,6 +65,27 @@ def _to_dt(v: datetime | date_cls) -> datetime:
 ReminderMinutes = Annotated[int, Field(ge=0, le=40320)]
 
 
+def validate_recurrence(value):
+    if not value:
+        return value
+    from datetime import timezone
+    from dateutil.rrule import rrulestr
+    from icalendar import vRecur
+    try:
+        rule = vRecur.from_ical(value)
+        if not rule.get("FREQ"):
+            raise ValueError("FREQ fehlt")
+        for key in ("INTERVAL", "COUNT"):
+            if key in rule and (len(rule[key]) != 1 or int(rule[key][0]) < 1):
+                raise ValueError(f"{key} muss positiv sein")
+        if "COUNT" in rule and "UNTIL" in rule:
+            raise ValueError("COUNT und UNTIL schließen sich aus")
+        rrulestr(value, dtstart=datetime(2000, 1, 1, tzinfo=timezone.utc))
+    except Exception as exc:
+        raise ValueError("Ungültige Wiederholungsregel") from exc
+    return value
+
+
 class EventCreate(BaseModel):
     calendar_id: str
     summary: str
@@ -73,7 +95,8 @@ class EventCreate(BaseModel):
     all_day: bool = False
     location: str | None = None
     description: str | None = None
-    rrule: str | None = None
+    rrule: str | None = Field(default=None, max_length=2048)
+    _valid_rrule = field_validator("rrule")(validate_recurrence)
 
 
 class EventUpdate(BaseModel):
@@ -85,7 +108,8 @@ class EventUpdate(BaseModel):
     all_day: bool = False
     location: str | None = None
     description: str | None = None
-    rrule: str | None = None
+    rrule: str | None = Field(default=None, max_length=2048)
+    _valid_rrule = field_validator("rrule")(validate_recurrence)
     # Nur gesetzt, wenn der Termin in einen anderen Kalender verschoben wird.
     # Nur für nicht-wiederkehrende Termine unterstützt (siehe put_event).
     calendar_id: str | None = None
@@ -503,6 +527,10 @@ def post_event(
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
 
+    created = body.model_dump(mode="json")
+    if created['reminders'] is None:
+        created['reminders'] = [user.default_reminder_minutes] if user.default_reminder_minutes is not None else []
+    record(db, user, body.calendar_id, uid, "create", None, created)
     background.add_task(run_sync)
     return {"uid": uid}
 
@@ -521,6 +549,7 @@ def put_event(
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
     service.ensure_calendar_write(db, user, event.calendar_id)
+    change = Change(db, user, event, "update", body)
 
     start_dt = _to_dt(body.start)
     end_dt = _to_dt(body.end)
@@ -536,6 +565,8 @@ def put_event(
 
         try:
             new_uid = update_event_future(
+                rrule=body.rrule,
+                replace_rrule="rrule" in body.model_fields_set,
                 calendar_id=event.calendar_id,
                 uid=event.remote_uid or uid,
                 etag=body.etag,
@@ -573,7 +604,7 @@ def put_event(
             start=start_dt.replace(tzinfo=None) if start_dt.tzinfo else start_dt,
             end=end_dt.replace(tzinfo=None) if end_dt.tzinfo else end_dt,
             all_day=body.all_day,
-            rrule=new_master_rrule,
+            rrule=body.rrule if "rrule" in body.model_fields_set else new_master_rrule,
             location=body.location,
             description=body.description,
             reminders=body.reminders if body.reminders is not None else event.reminders,
@@ -581,6 +612,7 @@ def put_event(
         ))
         db.commit()
 
+        change.finish()
         background.add_task(run_sync)
         return {"uid": uid, "new_uid": new_uid}
 
@@ -640,6 +672,7 @@ def put_event(
             raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
 
         db.commit()
+        change.finish()
         background.add_task(run_sync)
         return {"uid": uid}
 
@@ -679,8 +712,15 @@ def put_event(
             raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
 
         event.calendar_id = body.calendar_id
+        for key in ('summary', 'all_day', 'location', 'description'):
+            setattr(event, key, getattr(body, key))
+        event.start = _naive(start_dt)
+        event.end = _naive(end_dt)
+        if body.reminders is not None:
+            event.reminders = body.reminders
         db.commit()
 
+        change.finish()
         background.add_task(run_sync)
         return {"uid": uid}
 
@@ -705,6 +745,13 @@ def put_event(
     except CalDAVTimeoutError as e:
         raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
 
+    for key in ('summary', 'all_day', 'location', 'description', 'rrule'):
+        setattr(event, key, getattr(body, key))
+    event.start = _naive(start_dt)
+    event.end = _naive(end_dt)
+    if body.reminders is not None:
+        event.reminders = body.reminders
+    change.finish(snapshot(event))
     background.add_task(run_sync)
     return {"uid": uid}
 
@@ -723,6 +770,7 @@ def post_move(
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
     service.ensure_calendar_write(db, user, event.calendar_id)
+    change = Change(db, user, event, "move", body)
 
     if body.mode in ("single", "future") and body.recurrence_id is None:
         raise HTTPException(
@@ -831,6 +879,7 @@ def post_move(
 
         db.commit()
 
+    change.finish_move()
     background.add_task(run_sync)
 
     response = {"uid": uid}
@@ -853,6 +902,7 @@ def post_resize(
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
     service.ensure_calendar_write(db, user, event.calendar_id)
+    change = Change(db, user, event, "resize", body)
 
     if body.mode in ("single", "future") and body.recurrence_id is None:
         raise HTTPException(
@@ -955,6 +1005,7 @@ def post_resize(
 
         db.commit()
 
+    change.finish_move()
     background.add_task(run_sync)
 
     response = {"uid": uid}
@@ -977,6 +1028,7 @@ def post_restore_occurrence(
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
     service.ensure_calendar_write(db, user, event.calendar_id)
+    change = Change(db, user, event, "restore", body)
 
     try:
         restore_occurrence(
@@ -1001,6 +1053,7 @@ def post_restore_occurrence(
     ).delete(synchronize_session=False)
     db.commit()
 
+    change.finish()
     background.add_task(run_sync)
     return {"uid": uid}
 
@@ -1021,6 +1074,27 @@ def delete_event_endpoint(
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
     service.ensure_calendar_write(db, user, event.calendar_id)
+    if mode in ("single", "future") and not recurrence_id:
+        raise HTTPException(status_code=400, detail="recurrence_id ist erforderlich")
+    scope = "future" if mode == "future" else "single" if recurrence_id else "all"
+    if recurrence_id:
+        try:
+            datetime.fromisoformat(recurrence_id)
+        except ValueError:
+            raise HTTPException(400, "Ungültige recurrence_id")
+        if not event.rrule:
+            raise HTTPException(400, "Einzelne Vorkommen gibt es nur bei Serienterminen")
+    change = Change(db, user, event, "delete", scope=scope, recurrence_id=recurrence_id)
+    trash = prepare_trash(db, user, event, scope, recurrence_id)
+
+    def save_snapshot(raw):
+        trash.raw_ical = raw.decode() if isinstance(raw, bytes) else raw
+        db.commit()
+
+    def finish_delete():
+        trash.state = "deleted"
+        change.finish(scope=scope, recurrence_id=recurrence_id)
+
 
     # Diese und alle folgenden Instanzen einer Serie löschen (UNTIL-Split)
     if recurrence_id is not None and mode == "future":
@@ -1034,6 +1108,7 @@ def delete_event_endpoint(
 
         try:
             delete_future_occurrences(
+                snapshot_callback=save_snapshot,
                 calendar_id=event.calendar_id,
                 uid=event.remote_uid or uid,
                 etag=etag,
@@ -1057,7 +1132,7 @@ def delete_event_endpoint(
             EventOverride.master_uid == uid,
             EventOverride.recurrence_id >= rid_naive,
         ).delete(synchronize_session=False)
-        db.commit()
+        finish_delete()
         background.add_task(run_sync)
         return
 
@@ -1071,6 +1146,7 @@ def delete_event_endpoint(
 
         try:
             delete_occurrence(
+                snapshot_callback=save_snapshot,
                 calendar_id=event.calendar_id,
                 uid=event.remote_uid or uid,
                 etag=etag,
@@ -1096,13 +1172,14 @@ def delete_event_endpoint(
             start=None,
             end=None,
         ))
-        db.commit()
+        finish_delete()
         background.add_task(run_sync)
         return
 
     # Ganzes Event löschen
     try:
         delete_event(
+            snapshot_callback=save_snapshot,
             calendar_id=event.calendar_id,
             uid=event.remote_uid or uid,
             etag=etag,
@@ -1127,4 +1204,4 @@ def delete_event_endpoint(
 
     db.query(EventOverride).filter(EventOverride.master_uid == uid).delete(synchronize_session=False)
     db.delete(event)
-    db.commit()
+    finish_delete()

@@ -40,7 +40,7 @@ import {
   deleteEvent,
   moveEvent,
   resizeEvent,
-  restoreOccurrence,
+  restoreDeletedEvent,
 } from '../api/write';
 import { useOptimisticStore } from './eventsSlice';
 import { useRefreshBus } from './refreshBus';
@@ -112,27 +112,14 @@ async function applyInverse(action: HistoryAction): Promise<HistoryAction> {
     }
     case 'delete': {
       const before = action.before!;
-      if (action.scope === 'single') {
-        await restoreOccurrence(action.uid, {
-          etag: '',
-          recurrence_id: before.recurrence_id!,
-        });
-        useRefreshBus.getState().bump();
-        return action;
-      }
-      if (action.scope === 'future') {
-        await updateEvent(action.uid, eventToUpdatePayload(before, ''));
-        useRefreshBus.getState().bump();
-        return action;
-      }
-      const { uid } = await createEvent(eventToPayload(before));
-      const restored: CalendarEvent = { ...before, uid, etag: null };
-      if (before.is_recurring) {
-        useRefreshBus.getState().bump();
-      } else {
-        optimistic.addOptimistic(restored);
-      }
-      return { ...action, uid, before: restored };
+      const { uid } = await restoreDeletedEvent(action.uid, action.scope ?? 'all', action.scope === 'all' ? null : before.recurrence_id);
+      const restored: CalendarEvent = { ...before, uid, etag: null,
+        is_recurring: action.scope === 'single' ? false : before.is_recurring,
+        rrule: action.scope === 'single' ? null : before.rrule,
+        recurrence_id: null };
+      useRefreshBus.getState().bump();
+      if (!restored.is_recurring) optimistic.addOptimistic(restored);
+      return { ...action, uid, before: restored, scope: 'all' };
     }
     case 'update': {
       const before = action.before!;

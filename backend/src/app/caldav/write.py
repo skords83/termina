@@ -409,7 +409,7 @@ def update_event(
         raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
 
 
-def delete_event(calendar_id: str, uid: str, etag: str | None) -> None:
+def delete_event(calendar_id: str, uid: str, etag: str | None, snapshot_callback=None) -> None:
     try:
         client = _get_client()
         cal = _find_caldav_calendar(client, calendar_id)
@@ -423,6 +423,9 @@ def delete_event(calendar_id: str, uid: str, etag: str | None) -> None:
         current_etag = _get_etag(obj)
         if current_etag and etag and current_etag != etag:
             raise ConflictError(f"ETag-Konflikt für Event {uid}")
+
+        if snapshot_callback is not None:
+            snapshot_callback(obj.data)
 
         _caldav_op_with_retry(obj.delete, context=f"delete_event({uid})")
     except (ValueError, ConflictError):
@@ -500,6 +503,7 @@ def delete_occurrence(
     etag: str | None,
     recurrence_id: datetime,
     all_day: bool = False,
+    snapshot_callback=None,
 ) -> None:
     """Löscht eine einzelne Instanz einer Terminserie per EXDATE."""
     try:
@@ -515,6 +519,9 @@ def delete_occurrence(
         current_etag = _get_etag(obj)
         if current_etag and etag and current_etag != etag:
             raise ConflictError(f"ETag-Konflikt für Event {uid}")
+
+        if snapshot_callback is not None:
+            snapshot_callback(obj.data)
 
         ical = Calendar.from_ical(obj.data)
         master = _find_master(ical)
@@ -999,6 +1006,8 @@ def update_event_future(
     description: str | None,
     recurrence_id: datetime,
     reminders: list[int] | None = None,
+    rrule: str | None = None,
+    replace_rrule: bool = False,
 ) -> str:
     """
     Trennt die Serie an recurrence_id (UNTIL im alten Master) und legt ein neues
@@ -1024,9 +1033,8 @@ def update_event_future(
         if master is None:
             raise ValueError("Kein Master-VEVENT gefunden")
 
-        rrule = _split_master_until(ical, master, recurrence_id, all_day)
+        original_rrule = _split_master_until(ical, master, recurrence_id, all_day)
         obj.data = ical.to_ical()
-        _caldav_op_with_retry(obj.save, context=f"update_event_future(split, {uid})")
 
         new_uid = str(uuid.uuid4())
         new_cal = Calendar()
@@ -1050,8 +1058,9 @@ def update_event_future(
             new_ev.add("dtstart", _to_utc(start))
             new_ev.add("dtend", _to_utc(end))
 
-        fresh_rrule = _strip_rrule_keys(rrule, {"UNTIL", "COUNT"})
-        new_ev.add("rrule", fresh_rrule)
+        fresh_rrule = _parse_rrule_string(rrule) if replace_rrule else _strip_rrule_keys(original_rrule, {"UNTIL", "COUNT"})
+        if fresh_rrule is not None:
+            new_ev.add("rrule", fresh_rrule)
 
         copy_alarms(master, new_ev)
         if reminders is not None:
@@ -1061,6 +1070,16 @@ def update_event_future(
             lambda: cal.save_event(new_cal.to_ical()),
             context=f"update_event_future(create, {new_uid})",
         )
+
+        # Confirm the replacement before truncating the original; a failed
+        # upload must not remove the user's remaining appointments.
+        try:
+            _caldav_op_with_retry(obj.save, context=f"update_event_future(split, {uid})")
+        except CalDAVTimeoutError as exc:
+            raise CalDAVTimeoutError(
+                "Neue Serie gespeichert, ursprüngliche Serie nicht bestätigt begrenzt. "
+                "Bitte vor einem erneuten Versuch synchronisieren."
+            ) from exc
 
         logger.info("update_event_future: created new event uid=%s", new_uid)
         return new_uid
@@ -1079,6 +1098,7 @@ def delete_future_occurrences(
     etag: str | None,
     recurrence_id: datetime,
     all_day: bool = False,
+    snapshot_callback=None,
 ) -> None:
     """Löscht diese und alle folgenden Instanzen einer Serie (UNTIL-Split, kein Folge-Event)."""
     try:
@@ -1095,6 +1115,9 @@ def delete_future_occurrences(
         if current_etag and etag and current_etag != etag:
             raise ConflictError(f"ETag-Konflikt für Event {uid}")
 
+        if snapshot_callback is not None:
+            snapshot_callback(obj.data)
+
         ical = Calendar.from_ical(obj.data)
         master = _find_master(ical)
         if master is None:
@@ -1109,3 +1132,26 @@ def delete_future_occurrences(
         raise
     except Exception as e:
         raise CalDAVTimeoutError(f"CalDAV-Fehler: {e}") from e
+
+
+def restore_archived_object(calendar_id: str, uid: str, raw: bytes) -> None:
+    """Create one stable restore UID; retries never generate a second copy."""
+    try:
+        client = _get_client()
+        cal = _find_caldav_calendar(client, calendar_id)
+        if cal is None:
+            raise ValueError('Kalender nicht gefunden')
+        existing = _find_caldav_event(cal, uid)
+        if existing is not None:
+            # This random UID is persisted by the restore operation before upload.
+            return
+        url = str(cal.url).rstrip('/') + '/' + uid + '.ics'
+        result = client.put(url, raw, headers={'Content-Type':'text/calendar; charset=utf-8','If-None-Match':'*'})
+        if result.status == 412:
+            raise ConflictError('Wiederherstellungsziel existiert bereits')
+        if result.status not in (200,201,204):
+            raise CalDAVTimeoutError(f'CalDAV HTTP {result.status}')
+    except (ValueError,ConflictError,CalDAVTimeoutError):
+        raise
+    except Exception as exc:
+        raise CalDAVTimeoutError(str(exc)) from exc

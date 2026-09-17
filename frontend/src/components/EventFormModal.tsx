@@ -6,6 +6,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createEvent, updateEvent } from "../api/write";
+import { RecurrenceFields } from "./RecurrenceFields";
+import { rulePart } from "../utils/recurrence";
 import { useStore } from "../store";
 import { useToast } from "./Toast";
 import type { CalendarEvent, CreateEventPayload, WriteError } from "../types";
@@ -595,7 +597,7 @@ export function EventFormModal({
   );
   const [saving, setSaving] = useState(false);
 
-  const initialRrule = parseRrule(existingEvent?.rrule);
+  const initialRrule = parseRrule(prefillEvent?.rrule);
   const [recurFreq, setRecurFreq] = useState<RecurFreq>(initialRrule.freq);
   const [recurUntil, setRecurUntil] = useState(initialRrule.until);
   const [recurCount, setRecurCount] = useState(initialRrule.count);
@@ -675,10 +677,18 @@ export function EventFormModal({
     return null;
   }, [allDay, startStr, endStr, events, existingEvent]);
 
+  const interval = Number(rulePart(recurExtraParts, 'INTERVAL') || 1);
+  const monthDay = Number(rulePart(recurExtraParts, 'BYMONTHDAY') || 1);
+  const recurrenceValid = recurFreq === "none" || (Number.isInteger(interval) && interval >= 1 && interval <= 999 &&
+    (recurEndMode !== "count" || (Number.isInteger(Number(recurCount)) && Number(recurCount) >= 1)) &&
+    (recurEndMode !== "until" || (recurUntil.length === 10 && recurUntil >= startStr.slice(0,10))) &&
+    (recurFreq !== 'MONTHLY' || !/^\d+$/.test(rulePart(recurExtraParts,'BYMONTHDAY')) || (monthDay >= 1 && monthDay <= 31)));
+
   const handleSubmit = useCallback(async () => {
     if (!summary.trim() || !calendarId) return;
     setSaving(true);
     try {
+      if (!recurrenceValid) return;
       const payload = buildPayload();
       let uid: string;
       let savedEvent: CalendarEvent;
@@ -719,6 +729,7 @@ export function EventFormModal({
           reminders: payload.reminders,
           etag: null,
           is_recurring: !!payload.rrule,
+          rrule: payload.rrule,
         };
       }
 
@@ -745,6 +756,8 @@ export function EventFormModal({
     recurExtraParts,
     recurFreq,
     recurUntil,
+    recurEndMode,
+    recurrenceValid,
     isEdit,
     existingEvent,
     editScope,
@@ -753,7 +766,7 @@ export function EventFormModal({
     onClose,
   ]);
 
-  const canSave = summary.trim().length > 0 && calendars.some(c => c.id === calendarId);
+  const canSave = recurrenceValid && summary.trim().length > 0 && calendars.some(c => c.id === calendarId);
 
   if (editScope === null) {
     return (
@@ -887,7 +900,7 @@ export function EventFormModal({
                 }
                 setRecurExtraParts("");
               }}
-              disabled={editScope === "single" || editScope === "future"}
+              disabled={editScope === "single"}
             >
               {(Object.keys(FREQ_LABELS) as RecurFreq[]).map((f) => (
                 <option key={f} value={f}>
@@ -896,6 +909,8 @@ export function EventFormModal({
               ))}
             </select>
           </div>
+
+          <RecurrenceFields freq={recurFreq} parts={recurExtraParts} onChange={setRecurExtraParts} disabled={editScope === "single"} start={startStr} />
 
           {recurFreq !== "none" && (
             <div className="form-field">
@@ -912,7 +927,7 @@ export function EventFormModal({
                   if (mode !== "until") setRecurUntil("");
                   if (mode !== "count") setRecurCount("");
                 }}
-                disabled={editScope === "single" || editScope === "future"}
+                disabled={editScope === "single"}
               >
                 <option value="never">Kein Enddatum</option>
                 <option value="until">Endet am</option>
@@ -927,7 +942,7 @@ export function EventFormModal({
                 value={recurUntil}
                 min={startStr.slice(0, 10)}
                 onChange={setRecurUntil}
-                disabled={editScope === "single" || editScope === "future"}
+                disabled={editScope === "single"}
               />
             </div>
           )}
@@ -943,15 +958,14 @@ export function EventFormModal({
                 aria-label="Anzahl Wiederholungen"
                 value={recurCount}
                 onChange={(e) => setRecurCount(e.target.value)}
-                disabled={editScope === "single" || editScope === "future"}
+                disabled={editScope === "single"}
               />
             </div>
           )}
 
-          {(editScope === "single" || editScope === "future") && (
+          {(editScope === "single") && (
             <p className="form-recur-note">
-              Wiederholungseinstellungen gelten für alle Termine der Serie —
-              hier nicht änderbar.
+              Die Wiederholung kann für einen einzelnen Termin nicht geändert werden.
             </p>
           )}
         </div>

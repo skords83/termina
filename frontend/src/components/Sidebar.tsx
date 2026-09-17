@@ -6,6 +6,7 @@ interface Props {
   calendars: Calendar[];
   onImportExport: () => void;
   onSync: () => void;
+  onShowActivity: () => void;
   syncing: boolean;
   syncError: string | null;
   lastSyncedAt: string | null;
@@ -20,7 +21,7 @@ const MONTHS = [
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
 ];
 
-export function Sidebar({ calendars, onImportExport, onSync, syncing, syncError, lastSyncedAt, isAdmin, onShowAdmin, onLogout }: Props) {
+export function Sidebar({ calendars, onImportExport, onShowActivity, onSync, syncing, syncError, lastSyncedAt, isAdmin, onShowAdmin, onLogout }: Props) {
   const { activeMonth, setActiveMonth, toggleCalendar, isCalendarVisible } = useStore();
 
   const current = useMemo(() => new Date(activeMonth + 'T00:00:00'), [activeMonth]);
@@ -138,6 +139,7 @@ export function Sidebar({ calendars, onImportExport, onSync, syncing, syncError,
           {syncError || (syncing ? "Synchronisation läuft …" : lastSyncedAt ? <>Synchronisiert<br /><time dateTime={lastSyncedAt}>{new Date(lastSyncedAt).toLocaleString("de-DE", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" })}</time></> : "Noch nicht synchronisiert")}
         </div>
         <div className="sidebar-actions">
+          <button className="toolbar-btn" onClick={onShowActivity} title="Verlauf und Papierkorb" aria-label="Verlauf und Papierkorb"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2 5a6 6 0 1 1-.2 5M2 1v4h4M8 4v4l2 2" /></svg></button>
           <button className="toolbar-btn" onClick={onImportExport} title="Import &amp; Export (.ics)">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
               <path d="M8 2v8" />

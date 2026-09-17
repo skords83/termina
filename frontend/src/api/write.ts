@@ -138,3 +138,11 @@ export async function deleteEvent(
   );
   if (!res.ok) throw await parseError(res);
 }
+
+export async function restoreDeletedEvent(uid: string, scope = 'all', recurrenceId?: string | null): Promise<{ uid: string }> {
+  const query = new URLSearchParams({ scope });
+  if (recurrenceId) query.set('recurrence_id', recurrenceId);
+  const res = await fetch(`/api/trash/restore-latest/${encodeURIComponent(uid)}?${query}`, { method: 'POST', credentials: 'include' });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}

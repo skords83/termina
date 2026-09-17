@@ -189,3 +189,35 @@ class EventShareInstanceState(Base):
     snapshot_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     dismissed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+class CalendarChange(Base):
+    """Durable log, deliberately independent of event/calendar deletion cascades."""
+    __tablename__ = "calendar_changes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    calendar_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    target_calendar_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    event_uid: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    actor_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actor_name: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    scope: Mapped[str] = mapped_column(String, nullable=False, default="all")
+    recurrence_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    before: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    after: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class DeletedEvent(Base):
+    __tablename__ = "deleted_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    calendar_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    event_uid: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    summary: Mapped[str] = mapped_column(String, nullable=False)
+    scope: Mapped[str] = mapped_column(String, nullable=False)
+    recurrence_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    all_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    raw_ical: Mapped[str] = mapped_column(Text, nullable=False)
+    deleted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    deleted_by: Mapped[str] = mapped_column(String, nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False, default="deleted")
+    restored_uid: Mapped[str | None] = mapped_column(String, nullable=True)

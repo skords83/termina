@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import preferences, admin_users, calendars, event_shares, events, ics_api, public_ics, sync_api
+from app.api import activity, preferences, admin_users, calendars, event_shares, events, ics_api, public_ics, sync_api
 from app.auth import router as auth_router
 from app.auth.service import bootstrap_initial_admin
 from app.config import settings
@@ -50,6 +50,7 @@ async def private_responses(request, call_next):
 
 app.include_router(auth_router.router, prefix="/api")
 app.include_router(preferences.router, prefix="/api")
+app.include_router(activity.router, prefix="/api")
 app.include_router(admin_users.router, prefix="/api")
 app.include_router(calendars.router, prefix="/api")
 app.include_router(events.router, prefix="/api")

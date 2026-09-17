@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.activity import record
 from app.auth import service
 from app.auth.dependencies import get_current_user
 from app.caldav.sync import run_sync
@@ -125,6 +126,7 @@ def create_share(
     if existing_overrides:
         db.commit()
 
+    record(db, user, target_calendar_id, shared_uid, "share", None, {"summary": body.summary, "start": body.start.isoformat(), "end": body.end.isoformat(), "rrule": source.rrule, "calendar_id": target_calendar_id})
     background.add_task(run_sync)
 
     return _share_out(share, has_drift=False)
