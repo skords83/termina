@@ -486,8 +486,10 @@ export function EventPopup({
         {/* Kalender */}
         <div style={S.metaRow}>
           <span style={S.calDot(calendarColor)} />
-          <span>{calendarName}</span>
+          <span>{calendarName}{event.can_write === false ? " · Nur lesen" : ""}</span>
         </div>
+
+        {!!event.reminders?.length && <div style={S.metaRow}><span>Erinnerung: {event.reminders.map(n => n === 0 ? "zum Beginn" : `${n} Min. vorher`).join(", ")}</span></div>}
 
         {/* Ort */}
         {event.location && (
@@ -541,7 +543,8 @@ export function EventPopup({
                   onClose();
                   onEdit(event);
                 }}
-                title="Bearbeiten"
+                disabled={event.can_write === false}
+                title={event.can_write === false ? "Kalender ist nur lesbar" : "Bearbeiten"}
                 aria-label="Bearbeiten"
               >
                 ✎
@@ -570,6 +573,7 @@ export function EventPopup({
               </button>
               <button
                 style={S.btnDelete}
+                disabled={event.can_write === false}
                 onClick={handleDeleteClick}
               >
                 ✕ Löschen

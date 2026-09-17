@@ -133,7 +133,7 @@ def import_ics(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    service.ensure_calendar_access(db, user, calendar_id)
+    service.ensure_calendar_write(db, user, calendar_id)
 
     data = file.file.read(MAX_IMPORT_BYTES + 1)
     if len(data) > MAX_IMPORT_BYTES:

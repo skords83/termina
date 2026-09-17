@@ -22,7 +22,7 @@ function formatPreviewMeta(ev: ImportIcsPreviewEvent): string {
 export default function ImportExportModal({ calendars, onClose, onImported }: ImportExportModalProps) {
   const { showToast } = useToast();
   const [exportCalendarId, setExportCalendarId] = useState<string>('');
-  const [importCalendarId, setImportCalendarId] = useState<string>(calendars[0]?.id ?? '');
+  const [importCalendarId, setImportCalendarId] = useState<string>(calendars.find(c => c.can_write !== false)?.id ?? '');
   const [file, setFile] = useState<File | null>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -156,7 +156,7 @@ export default function ImportExportModal({ calendars, onClose, onImported }: Im
               value={importCalendarId}
               onChange={(e) => setImportCalendarId(e.target.value)}
             >
-              {calendars.map((cal) => (
+              {calendars.filter(c => c.can_write !== false).map((cal) => (
                 <option key={cal.id} value={cal.id}>{cal.name}</option>
               ))}
             </select>

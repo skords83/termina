@@ -15,8 +15,9 @@ from sqlalchemy.orm import Session
 
 from app.caldav.client import get_caldav_client
 from app.db import session as db_session
-from app.db.models import Calendar, Event, EventOverride, EventShare, EventShareInstanceState
+from app.db.models import Calendar, Event, EventOverride, EventShare, EventShareInstanceState, SyncState
 from app.db.identity import event_identity
+from app.reminders import read_reminders
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,7 @@ _DISCOVERY_BODY = """<?xml version="1.0" encoding="utf-8"?>
   <d:prop>
     <d:displayname/>
     <d:resourcetype/>
+    <d:current-user-privilege-set/>
     <a:calendar-color/>
     <cs:getctag/>
     <cs:source/>
@@ -199,6 +201,8 @@ def _discover_calendars(client: Any) -> list[dict] | None:
         else:
             full_url = href
 
+        privileges = response.find(".//d:current-user-privilege-set", NS)
+        can_write = privileges is None or any(privileges.find(f".//d:{name}", NS) is not None for name in ("write", "all", "write-content"))
         calendars.append(
             {
                 "url": full_url,
@@ -207,6 +211,7 @@ def _discover_calendars(client: Any) -> list[dict] | None:
                 "color": color,
                 "ctag": ctag,
                 "subscribed": is_subscribed,
+                "read_only": is_subscribed or not can_write,
                 "source_url": source_url,
             }
         )
@@ -469,6 +474,7 @@ def _upsert_event(
         existing.location = location
         existing.description = description
         existing.raw_ical = raw
+        existing.reminders = read_reminders(master_component)
     else:
         db.add(
             Event(
@@ -484,6 +490,7 @@ def _upsert_event(
                 location=location,
                 description=description,
                 raw_ical=raw,
+                reminders=read_reminders(master_component),
             )
         )
         db.flush()
@@ -508,6 +515,7 @@ def _upsert_event(
         ov_end_dt, _ = _parse_dt(ov_end_val)
         overrides_by_rid[rid_norm] = {
             "master_uid": master_uid,
+            "reminders": read_reminders(ov_comp),
             "recurrence_id": rid_norm,
             "start": ov_start_dt,
             "end": ov_end_dt,
@@ -528,6 +536,7 @@ def _upsert_event(
                 if rid_norm is not None and rid_norm not in overrides_by_rid:
                     overrides_by_rid[rid_norm] = {
                         "master_uid": master_uid,
+                        "reminders": None,
                         "recurrence_id": rid_norm,
                         "start": None,
                         "end": None,
@@ -550,6 +559,7 @@ def _upsert_event(
         upsert_stmt = upsert_stmt.on_conflict_do_update(
             index_elements=["master_uid", "recurrence_id"],
             set_={
+                "reminders": upsert_stmt.excluded.reminders,
                 "start": upsert_stmt.excluded.start,
                 "end": upsert_stmt.excluded.end,
                 "summary": upsert_stmt.excluded.summary,
@@ -561,7 +571,7 @@ def _upsert_event(
     return True
 
 
-def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
+def _sync_subscribed_calendar(db: Session, cal_info: dict) -> bool:
     """
     Sync für ICS-Abo-Kalender (cs:subscribed).
     Events aus abonnierten Kalendern sind per PROPFIND/REPORT nicht abrufbar,
@@ -591,20 +601,18 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
         if cal_info["color"]:
             db_cal.color = cal_info["color"]
 
+    db_cal.read_only = True
     if ctag and db_cal.ctag == ctag:
         logger.debug(
             "Subscribed calendar %s unchanged (ctag match), skipping.", db_cal.name
         )
-        return
+        return True
 
     if not source_url:
         logger.warning(
             "Subscribed calendar %s has no source URL, skipping.", db_cal.name
         )
-        db_cal.ctag = ctag
-        db_cal.last_synced_at = datetime.now(timezone.utc)
-        db.commit()
-        return
+        return False
 
     logger.info("Syncing subscribed calendar: %s from %s", db_cal.name, source_url)
 
@@ -622,16 +630,11 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
         logger.error(
             "HTTP %d fetching subscribed ICS for %s: %s", exc.code, db_cal.name, exc
         )
-        if exc.code in (403, 404, 410):
-            # Permanenter Fehler — ctag setzen damit der nächste Sync nicht blind wiederholt
-            db_cal.ctag = ctag
-            db_cal.last_synced_at = datetime.now(timezone.utc)
-            db.commit()
-        return
+        return False
     except Exception as exc:
         # Transienter Fehler (Timeout, Netzwerk) — kein ctag-Update, beim nächsten Intervall retry
         logger.error("Failed to fetch subscribed ICS for %s: %s", db_cal.name, exc)
-        return
+        return False
 
     # Alle VEVENTs parsen
     try:
@@ -639,10 +642,7 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
     except Exception as exc:
         logger.error("Failed to parse ICS for %s: %s", db_cal.name, exc)
         # Kaputtes ICS ist kein transienter Fehler — ctag setzen bis die Quelle sich ändert
-        db_cal.ctag = ctag
-        db_cal.last_synced_at = datetime.now(timezone.utc)
-        db.commit()
-        return
+        return False
 
     local_events: dict[str, Event] = {
         e.uid: e for e in db.query(Event).filter(Event.calendar_id == cal_url).all()
@@ -727,6 +727,7 @@ def _sync_subscribed_calendar(db: Session, cal_info: dict) -> None:
         upserted,
         deleted_count,
     )
+    return True
 
 
 def _apply_calendar_colors(db: Session, color_map: dict[str, str]) -> None:
@@ -747,7 +748,7 @@ def _apply_calendar_colors(db: Session, color_map: dict[str, str]) -> None:
         logger.info("Kalenderfarben aktualisiert: %d Kalender", updated)
 
 
-def _sync_ics_feed(db: Session, feed: dict) -> None:
+def _sync_ics_feed(db: Session, feed: dict) -> bool:
     """Synct einen extern konfigurierten ICS-Feed (read-only, kein CalDAV-Write)."""
     import hashlib
     import urllib.error
@@ -772,27 +773,29 @@ def _sync_ics_feed(db: Session, feed: dict) -> None:
         if color:
             db_cal.color = color
 
+    db_cal.read_only = True
+    db.commit()
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Termina/1.0 ICS-Sync"})
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw_ics = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         logger.error("HTTP %d beim Abruf von ICS-Feed %s: %s", exc.code, name, exc)
-        return
+        return False
     except Exception as exc:
         logger.error("Abruf von ICS-Feed %s fehlgeschlagen: %s", name, exc)
-        return
+        return False
 
     content_hash = hashlib.sha256(raw_ics.encode()).hexdigest()[:16]
     if db_cal.ctag == content_hash:
         logger.debug("ICS-Feed %s unverändert (Hash-Match), übersprungen.", name)
-        return
+        return True
 
     try:
         ical = ICalendar.from_ical(raw_ics)
     except Exception as exc:
         logger.error("ICS-Feed %s konnte nicht geparst werden: %s", name, exc)
-        return
+        return False
 
     local_events: dict[str, Event] = {
         e.uid: e for e in db.query(Event).filter(Event.calendar_id == feed_id).all()
@@ -828,6 +831,7 @@ def _sync_ics_feed(db: Session, feed: dict) -> None:
             existing.rrule = rrule
             existing.location = location
             existing.description = description
+            existing.reminders = read_reminders(component)
         else:
             db.add(Event(
                 uid=uid,
@@ -841,6 +845,7 @@ def _sync_ics_feed(db: Session, feed: dict) -> None:
                 rrule=rrule,
                 location=location,
                 description=description,
+                reminders=read_reminders(component),
                 raw_ical="",
             ))
         db.flush()
@@ -863,13 +868,13 @@ def _sync_ics_feed(db: Session, feed: dict) -> None:
         "ICS-Feed-Sync abgeschlossen für %s: %d upserted, %d deleted",
         name, upserted, deleted_count,
     )
+    return True
 
 
-def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
+def _sync_calendar(db: Session, client: Any, cal_info: dict) -> bool:
     # Subscribed-Kalender haben einen eigenen Sync-Pfad
     if cal_info.get("subscribed"):
-        _sync_subscribed_calendar(db, cal_info)
-        return
+        return _sync_subscribed_calendar(db, cal_info)
 
     cal_url = cal_info["url"]
     ctag = cal_info["ctag"]
@@ -892,9 +897,10 @@ def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
         if cal_info["color"]:
             db_cal.color = cal_info["color"]
 
+    db_cal.read_only = cal_info.get("read_only", cal_info.get("subscribed", False))
     if ctag and db_cal.ctag == ctag:
         logger.debug("Calendar %s unchanged (ctag match), skipping.", db_cal.name)
-        return
+        return True
 
     logger.info("Syncing calendar: %s", db_cal.name)
 
@@ -903,7 +909,7 @@ def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
         remote_etags = _propfind_etags(client, cal_url)
     except Exception as exc:
         logger.error("PROPFIND failed for %s: %s", cal_url, exc)
-        return
+        return False
 
     logger.info("Calendar %s: %d remote objects", db_cal.name, len(remote_etags))
 
@@ -938,11 +944,11 @@ def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
             fetched = _multiget_ical(client, cal_url, urls_to_fetch)
         except Exception as exc:
             logger.error("MULTIGET failed for %s: %s", cal_url, exc)
-            return
+            return False
 
         if set(fetched) != set(urls_to_fetch):
             logger.warning("Incomplete MULTIGET for %s; retaining local data and CTag", cal_url)
-            return
+            return False
 
         for obj_url, (remote_etag, raw) in fetched.items():
             # Jedes Event in einem eigenen SAVEPOINT: schlägt der Upsert für ein
@@ -962,7 +968,7 @@ def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
     # Unveränderte Events als "gesehen" markieren (nicht löschen!)
     if not complete:
         db.commit()  # Keep valid updates, but retry failed resources on the next run.
-        return
+        return False
 
     for event in local_events.values():
         if event.etag in unchanged_etags:
@@ -990,17 +996,39 @@ def _sync_calendar(db: Session, client: Any, cal_info: dict) -> None:
         len(urls_to_fetch),
         deleted_count,
     )
+    return True
 
 
 def run_sync() -> None:
     """Entry point called by APScheduler."""
     with _sync_lock:
-        _run_sync_locked()
+        with db_session.SessionLocal() as db:
+            state = db.get(SyncState, 1)
+            if state is None:
+                state = SyncState(id=1)
+                db.add(state)
+            state.running = True
+            state.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            state.error = None
+            db.commit()
+        failed = True
+        try:
+            failed = bool(_run_sync_locked())
+        finally:
+            with db_session.SessionLocal() as db:
+                state = db.get(SyncState, 1)
+                state.running = False
+                state.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                state.error = "Nicht alle Kalender konnten synchronisiert werden. Bitte erneut versuchen." if failed else None
+                if not failed:
+                    state.last_success_at = state.finished_at
+                db.commit()
 
 
-def _run_sync_locked() -> None:
+def _run_sync_locked() -> int:
     from app.config import settings
 
+    errors = 0
     logger.info("Starting CalDAV sync run")
     db: Session = db_session.SessionLocal()
     try:
@@ -1011,18 +1039,23 @@ def _run_sync_locked() -> None:
         # damit keine Kalender-Daten durch einen transienten Fehler gelöscht werden.
         discovery_ok = calendars is not None
         if not discovery_ok:
+            errors += 1
             logger.warning(
                 "CalDAV-Discovery fehlgeschlagen — Kalender-Cleanup wird übersprungen."
             )
             calendars = []
 
+        if any(not c.get("discovery_complete", True) for c in calendars):
+            errors += 1
         remote_urls = {c["url"] for c in calendars}
 
         for cal_info in calendars:
             try:
-                _sync_calendar(db, client, cal_info)
+                if _sync_calendar(db, client, cal_info) is False:
+                    errors += 1
             except Exception as exc:
                 logger.error("Error syncing calendar %s: %s", cal_info["url"], exc)
+                errors += 1
                 db.rollback()
 
         # ICS-Feeds aus Konfiguration
@@ -1033,9 +1066,11 @@ def _run_sync_locked() -> None:
                 url = "https://" + url[len("webcal://"):]
             ics_feed_ids.add(url)
             try:
-                _sync_ics_feed(db, {**feed, "url": url})
+                if _sync_ics_feed(db, {**feed, "url": url}) is False:
+                    errors += 1
             except Exception as exc:
                 logger.error("Error syncing ICS feed %s: %s", feed.get("name"), exc)
+                errors += 1
                 db.rollback()
 
         # Geburtstage aus CardDAV-Adressbüchern (optional, gleicher Server/gleiche Credentials)
@@ -1045,9 +1080,11 @@ def _run_sync_locked() -> None:
 
             birthday_calendar_ids.add(BIRTHDAYS_CALENDAR_ID)
             try:
-                _sync_birthdays(db, client)
+                if _sync_birthdays(db, client) is False:
+                    errors += 1
             except Exception as exc:
                 logger.error("Error syncing birthdays: %s", exc)
+                errors += 1
                 db.rollback()
 
         # Kalender entfernen die weder im CalDAV-Server noch in den ICS-Feeds/Geburtstagen
@@ -1069,7 +1106,9 @@ def _run_sync_locked() -> None:
         _apply_calendar_colors(db, settings.calendar_colors)
 
     except Exception as exc:
+        errors += 1
         logger.error("Sync run failed: %s", exc)
     finally:
         db.close()
     logger.info("CalDAV sync run finished")
+    return errors

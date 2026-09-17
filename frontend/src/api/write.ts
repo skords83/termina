@@ -17,6 +17,7 @@ const headers = () => ({
 });
 
 function mapError(status: number, body?: any): WriteError {
+  if (status === 403) return { type: 'bad_request', message: 'Keine Schreibberechtigung für diesen Kalender.' };
   if (status === 400) return { type: 'bad_request', message: body?.detail ?? 'Ungültige Anfrage' };
   if (status === 401) return { type: 'auth' };
   if (status === 404) return { type: 'not_found' };

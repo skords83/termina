@@ -77,7 +77,7 @@ def create_share(
             status_code=400,
             detail="Zielkalender 'Oma & Opa' ist nicht konfiguriert (OMA_OPA_CALENDAR_ID)",
         )
-    service.ensure_calendar_access(db, user, target_calendar_id)
+    service.ensure_calendar_write(db, user, target_calendar_id)
 
     try:
         shared_uid = create_event(
@@ -164,7 +164,7 @@ def sync_snapshot(
     source = db.query(Event).filter(Event.uid == share.source_uid).first()
     if source is None:
         raise HTTPException(status_code=404, detail="Quelltermin nicht gefunden")
-    service.ensure_calendar_access(db, user, source.calendar_id)
+    service.ensure_calendar_write(db, user, source.calendar_id)
 
     share.snapshot_start = source.start
     share.snapshot_end = source.end
@@ -291,7 +291,7 @@ def sync_instance_snapshot(
     source = db.query(Event).filter(Event.uid == share.source_uid).first()
     if source is None:
         raise HTTPException(status_code=404, detail="Quelltermin nicht gefunden")
-    service.ensure_calendar_access(db, user, source.calendar_id)
+    service.ensure_calendar_write(db, user, source.calendar_id)
 
     rid_naive = _naive(body.source_recurrence_id)
     _upsert_instance_state(db, share, share.source_uid, rid_naive, dismissed=True)

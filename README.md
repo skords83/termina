@@ -66,3 +66,13 @@ Bei einer mehrdeutigen oder abweichenden Installation kann die GitHub-Actions-
 Repository-Variable `TERMINA_DEPLOY_DIR` auf das aktuelle Stack-Verzeichnis auf
 dem Host gesetzt werden. Fehlende Pfade oder ungültige Compose-Dateien brechen
 den Deploy vor Änderungen an den Containern ab.
+
+## Persönliche Einstellungen und Kalenderrechte
+
+Über das Zahnrad lassen sich Standardkalender, Termindauer, Startansicht, Standarderinnerung und das eigene Passwort ändern. Einstellungen gelten pro Nutzer. Die Standarddauer gilt für neue Termine im Terminformular; die Schnelleingabe verwendet ihre erkannte Zeitangabe.
+
+Die Nutzerverwaltung unterscheidet keinen Zugriff, Lesen und Bearbeiten. Bestehende Freigaben behalten bei der Migration ihre Schreibrechte; neue Freigaben beginnen mit Lesezugriff. Abonnements, ICS-Feeds, Geburtstagskalender und vom CalDAV-Server als schreibgeschützt gemeldete Kalender bleiben auch für Administratoren nur lesbar.
+
+Der Sync-Status zeigt den letzten vollständigen Erfolg, laufende Synchronisationen und Fehler. Bei Teilfehlern bleibt der letzte Erfolgszeitpunkt erhalten. Der Status wird alle fünf Sekunden aktualisiert.
+
+Termine unterstützen bis zu fünf relative DISPLAY-Erinnerungen vor Beginn (auch zum Beginn). Sie werden als VALARM über CalDAV gespeichert und durch eine verbundene Kalender-App ausgelöst; eigene Web-Push-Benachrichtigungen sind nicht enthalten. Andere vorhandene Alarmtypen bleiben beim Bearbeiten erhalten. Ganztagserinnerungen beziehen sich auf den gespeicherten Tagesbeginn.

@@ -5,9 +5,10 @@ interface Props {
   user: AuthUser;
   onSuccess: (user: AuthUser) => void;
   onLogout: () => void;
+  embedded?: boolean;
 }
 
-export function ChangePasswordForm({ user, onSuccess, onLogout }: Props) {
+export function ChangePasswordForm({ user, onSuccess, onLogout, embedded = false }: Props) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -58,8 +59,8 @@ export function ChangePasswordForm({ user, onSuccess, onLogout }: Props) {
   }
 
   return (
-    <div className="login-wrap">
-      <div className="login-card">
+    <div className={embedded ? "password-settings" : "login-wrap"}>
+      <div className={embedded ? "" : "login-card"}>
         <div className="login-logo">
           <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
             <rect x="4" y="6" width="24" height="22" rx="4" stroke="var(--accent)" strokeWidth="2" />
@@ -81,6 +82,7 @@ export function ChangePasswordForm({ user, onSuccess, onLogout }: Props) {
               type="password"
               className="login-input"
               placeholder="Aktuelles Passwort"
+              aria-label="Aktuelles Passwort" autoComplete="current-password"
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
               autoFocus
@@ -91,6 +93,7 @@ export function ChangePasswordForm({ user, onSuccess, onLogout }: Props) {
             type="password"
             className="login-input"
             placeholder="Neues Passwort (mindestens 12 Zeichen)"
+              aria-label="Neues Passwort (mindestens 12 Zeichen)" autoComplete="new-password"
             minLength={12}
             maxLength={1024}
             required
@@ -103,6 +106,7 @@ export function ChangePasswordForm({ user, onSuccess, onLogout }: Props) {
             type="password"
             className="login-input"
             placeholder="Neues Passwort bestätigen"
+              aria-label="Neues Passwort bestätigen" autoComplete="new-password"
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             spellCheck={false}
@@ -112,7 +116,7 @@ export function ChangePasswordForm({ user, onSuccess, onLogout }: Props) {
             {loading ? 'Speichere…' : 'Passwort ändern'}
           </button>
           <button className="login-cancel-btn" type="button" onClick={onLogout}>
-            Abmelden
+            {embedded ? "Zurück" : "Abmelden"}
           </button>
         </form>
       </div>

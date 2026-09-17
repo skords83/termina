@@ -20,6 +20,7 @@ class UserSummary(BaseModel):
     must_change_password: bool
     last_login_at: str | None
     calendar_ids: list[str]
+    writable_calendar_ids: list[str] = []
 
 
 class UserCreate(BaseModel):
@@ -27,6 +28,7 @@ class UserCreate(BaseModel):
     display_name: str
     role: str = "member"
     calendar_ids: list[str] = []
+    writable_calendar_ids: list[str] = []
 
 
 class TempPasswordOut(BaseModel):
@@ -35,6 +37,7 @@ class TempPasswordOut(BaseModel):
 
 class CalendarAccessUpdate(BaseModel):
     calendar_ids: list[str]
+    writable_calendar_ids: list[str] = []
 
 
 def _to_summary(db: Session, user: User) -> UserSummary:
@@ -47,6 +50,7 @@ def _to_summary(db: Session, user: User) -> UserSummary:
         must_change_password=user.must_change_password,
         last_login_at=user.last_login_at.isoformat() if user.last_login_at else None,
         calendar_ids=[row[0] for row in rows],
+        writable_calendar_ids=[r.calendar_id for r in db.query(UserCalendarAccess).filter_by(user_id=user.id, can_write=True).all()],
     )
 
 
@@ -75,7 +79,9 @@ def create_user(
         raise HTTPException(status_code=409, detail="E-Mail bereits vergeben")
 
     _validate_calendar_ids(db, body.calendar_ids)
-    _, temp_password = service.create_user(db, body.email, body.display_name, body.role, body.calendar_ids)
+    if not set(body.writable_calendar_ids).issubset(body.calendar_ids):
+        raise HTTPException(status_code=400, detail="Schreibrechte erfordern Lesezugriff")
+    _, temp_password = service.create_user(db, body.email, body.display_name, body.role, body.calendar_ids, body.writable_calendar_ids)
     return TempPasswordOut(temp_password=temp_password)
 
 
@@ -101,5 +107,7 @@ def update_calendar_access(
     if user is None:
         raise HTTPException(status_code=404, detail="User nicht gefunden")
     _validate_calendar_ids(db, body.calendar_ids)
-    service.set_calendar_access(db, user, body.calendar_ids)
+    if not set(body.writable_calendar_ids).issubset(body.calendar_ids):
+        raise HTTPException(status_code=400, detail="Schreibrechte erfordern Lesezugriff")
+    service.set_calendar_access(db, user, body.calendar_ids, body.writable_calendar_ids)
     return _to_summary(db, user)

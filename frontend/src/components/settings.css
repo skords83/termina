@@ -1,0 +1,18 @@
+.settings-dialog { width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-2); color: var(--text); }
+.settings-dialog::backdrop { background: rgb(0 0 0 / .6); }
+.settings-dialog form, .settings-dialog label { display: grid; gap: 8px; }
+.settings-dialog form { gap: 18px; }
+.settings-dialog h2 { font-size: 20px; margin: 0; }
+.settings-dialog input, .settings-dialog select { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-3); color: var(--text); font: inherit; }
+.settings-dialog p { font-size: 13px; color: var(--text-2); margin: 0; }
+.settings-dialog footer { display: flex; justify-content: flex-end; gap: 12px; }
+.settings-dialog button { padding: 10px 14px; border-radius: 6px; border: 1px solid var(--border); color: var(--text); background: var(--bg-3); cursor: pointer; }
+.settings-dialog button[type=submit] { background: var(--accent); color: white; }
+.sync-status { padding: 4px 16px; font-size: 12px; color: var(--text-2); min-height: 24px; }
+
+.reminder-options { border: 1px solid var(--border); border-radius: 6px; padding: 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.reminder-options label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.reminder-options input { accent-color: var(--accent); }
+
+.sync-status button { margin-left: 8px; border: 0; color: var(--accent); background: transparent; font: inherit; cursor: pointer; }
+.sync-status button:disabled { opacity: .5; cursor: default; }

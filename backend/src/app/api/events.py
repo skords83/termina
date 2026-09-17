@@ -24,7 +24,8 @@ def _dt_to_iso(dt: datetime | None, all_day: bool) -> str | None:
     return dt.replace(tzinfo=_BERLIN).isoformat()
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Annotated
 from sqlalchemy.orm import Session
 
 from app.auth import service
@@ -60,9 +61,13 @@ def _to_dt(v: datetime | date_cls) -> datetime:
     return datetime(v.year, v.month, v.day, 0, 0, 0)
 
 
+ReminderMinutes = Annotated[int, Field(ge=0, le=40320)]
+
+
 class EventCreate(BaseModel):
     calendar_id: str
     summary: str
+    reminders: list[ReminderMinutes] | None = Field(default=None, max_length=5)
     start: datetime | date_cls
     end: datetime | date_cls
     all_day: bool = False
@@ -74,6 +79,7 @@ class EventCreate(BaseModel):
 class EventUpdate(BaseModel):
     etag: str | None = None
     summary: str
+    reminders: list[ReminderMinutes] | None = Field(default=None, max_length=5)
     start: datetime | date_cls
     end: datetime | date_cls
     all_day: bool = False
@@ -187,6 +193,7 @@ def expand_rrule_event(
                     "is_recurring": True,
                     "recurrence_id": inst.isoformat(),
                     "rrule": event.rrule,
+                    "reminders": override.reminders if override.reminders is not None else (event.reminders or []),
                     "shared_drift": drift_fn(event.uid, inst.isoformat()) if drift_fn else False,
                 })
             else:
@@ -208,6 +215,7 @@ def expand_rrule_event(
                     "is_recurring": True,
                     "recurrence_id": inst.isoformat(),
                     "rrule": event.rrule,
+                "reminders": event.reminders or [],
                     "shared_drift": drift_fn(event.uid, inst.isoformat()) if drift_fn else False,
                 })
 
@@ -234,6 +242,7 @@ def expand_rrule_event(
                 "is_recurring": True,
                 "recurrence_id": event.start.isoformat() if event.start else None,
                 "rrule": event.rrule,
+                "reminders": event.reminders or [],
                 "shared_drift": drift_fn(event.uid, event.start.isoformat()) if drift_fn and event.start else False,
             }]
         return []
@@ -346,6 +355,7 @@ def get_events(
             "is_recurring": False,
             "recurrence_id": None,
             "rrule": None,
+            "reminders": e.reminders or [],
             "shared_drift": drift_fn(e.uid, None),
         })
 
@@ -423,6 +433,7 @@ def search_events(
             "is_recurring": False,
             "recurrence_id": None,
             "rrule": None,
+            "reminders": e.reminders or [],
         }
         if _text_matches(item, needle):
             result.append(item)
@@ -474,7 +485,7 @@ def post_event(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    service.ensure_calendar_access(db, user, body.calendar_id)
+    service.ensure_calendar_write(db, user, body.calendar_id)
     try:
         uid = create_event(
             calendar_id=body.calendar_id,
@@ -485,6 +496,7 @@ def post_event(
             location=body.location,
             description=body.description,
             rrule=body.rrule,
+            reminders=body.reminders if body.reminders is not None else ([user.default_reminder_minutes] if user.default_reminder_minutes is not None else []),
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -508,7 +520,7 @@ def put_event(
     event = db.query(Event).filter(Event.uid == uid).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
-    service.ensure_calendar_access(db, user, event.calendar_id)
+    service.ensure_calendar_write(db, user, event.calendar_id)
 
     start_dt = _to_dt(body.start)
     end_dt = _to_dt(body.end)
@@ -533,6 +545,7 @@ def put_event(
                 all_day=body.all_day,
                 location=body.location,
                 description=body.description,
+                reminders=body.reminders,
                 recurrence_id=body.recurrence_id,
             )
         except ConflictError:
@@ -563,6 +576,7 @@ def put_event(
             rrule=new_master_rrule,
             location=body.location,
             description=body.description,
+            reminders=body.reminders if body.reminders is not None else event.reminders,
             raw_ical=None,
         ))
         db.commit()
@@ -589,6 +603,8 @@ def put_event(
             existing_ov.end = end_naive
             existing_ov.location = body.location
             existing_ov.description = body.description
+            if body.reminders is not None:
+                existing_ov.reminders = body.reminders
         else:
             db.add(EventOverride(
                 master_uid=uid,
@@ -598,8 +614,8 @@ def put_event(
                 end=end_naive,
                 location=body.location,
                 description=body.description,
+                reminders=body.reminders if body.reminders is not None else event.reminders,
             ))
-        db.commit()
 
         try:
             update_event(
@@ -613,6 +629,7 @@ def put_event(
                 location=body.location,
                 description=body.description,
                 rrule=event.rrule,
+                reminders=body.reminders,
                 recurrence_id=body.recurrence_id,
             )
         except ConflictError:
@@ -622,6 +639,7 @@ def put_event(
         except CalDAVTimeoutError as e:
             raise HTTPException(status_code=503, detail=f"CalDAV-Server nicht erreichbar: {e}")
 
+        db.commit()
         background.add_task(run_sync)
         return {"uid": uid}
 
@@ -637,7 +655,7 @@ def put_event(
                 status_code=400,
                 detail="Kalenderwechsel wird für wiederkehrende Termine nicht unterstützt",
             )
-        service.ensure_calendar_access(db, user, body.calendar_id)
+        service.ensure_calendar_write(db, user, body.calendar_id)
 
         try:
             move_event_calendar(
@@ -651,6 +669,7 @@ def put_event(
                 all_day=body.all_day,
                 location=body.location,
                 description=body.description,
+                reminders=body.reminders,
             )
         except ConflictError:
             raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
@@ -677,6 +696,7 @@ def put_event(
             location=body.location,
             description=body.description,
             rrule=body.rrule,
+            reminders=body.reminders,
         )
     except ConflictError:
         raise HTTPException(status_code=409, detail="Extern geändert – bitte neu laden")
@@ -702,7 +722,7 @@ def post_move(
     event = db.query(Event).filter(Event.uid == uid).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
-    service.ensure_calendar_access(db, user, event.calendar_id)
+    service.ensure_calendar_write(db, user, event.calendar_id)
 
     if body.mode in ("single", "future") and body.recurrence_id is None:
         raise HTTPException(
@@ -805,6 +825,7 @@ def post_move(
                 rrule=new_master_rrule if (rid_naive is not None and event.rrule) else fresh_rrule,
                 location=event.location,
                 description=event.description,
+                reminders=event.reminders,
                 raw_ical=None,
             ))
 
@@ -831,7 +852,7 @@ def post_resize(
     event = db.query(Event).filter(Event.uid == uid).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
-    service.ensure_calendar_access(db, user, event.calendar_id)
+    service.ensure_calendar_write(db, user, event.calendar_id)
 
     if body.mode in ("single", "future") and body.recurrence_id is None:
         raise HTTPException(
@@ -928,6 +949,7 @@ def post_resize(
                 rrule=new_master_rrule if (rid_naive is not None and event.rrule) else fresh_rrule,
                 location=event.location,
                 description=event.description,
+                reminders=event.reminders,
                 raw_ical=None,
             ))
 
@@ -954,7 +976,7 @@ def post_restore_occurrence(
     event = db.query(Event).filter(Event.uid == uid).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
-    service.ensure_calendar_access(db, user, event.calendar_id)
+    service.ensure_calendar_write(db, user, event.calendar_id)
 
     try:
         restore_occurrence(
@@ -998,7 +1020,7 @@ def delete_event_endpoint(
     event = db.query(Event).filter(Event.uid == uid).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event nicht gefunden")
-    service.ensure_calendar_access(db, user, event.calendar_id)
+    service.ensure_calendar_write(db, user, event.calendar_id)
 
     # Diese und alle folgenden Instanzen einer Serie löschen (UNTIL-Split)
     if recurrence_id is not None and mode == "future":

@@ -9,6 +9,10 @@ export interface AuthUser {
   display_name: string;
   role: string;
   must_change_password: boolean;
+  default_calendar_id?: string | null;
+  default_duration_minutes?: number;
+  default_view?: "month" | "week" | "day" | "agenda";
+  default_reminder_minutes?: number | null;
 }
 
 interface AppState {

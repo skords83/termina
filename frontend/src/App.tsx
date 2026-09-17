@@ -16,6 +16,8 @@ import { useEvents } from './hooks/useEvents';
 import { LoginForm } from './components/LoginForm';
 import { ChangePasswordForm } from './components/ChangePasswordForm';
 import AdminUsersPage from './components/AdminUsersPage';
+import { SettingsDialog } from './components/SettingsDialog';
+import { useSyncStatus } from './hooks/useSyncStatus';
 import { Sidebar } from './components/Sidebar';
 import { MonthView } from './components/MonthView';
 import { EventPopup } from './components/EventPopup';
@@ -174,12 +176,13 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
   const [createModal, setCreateModal] = useState<{ defaultDate: string } | null>(null);
   const [duplicateModal, setDuplicateModal] = useState<CalendarEvent | null>(null);
   const [shareModal, setShareModal] = useState<CalendarEvent | null>(null);
-  const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
+  const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>(user.default_view ?? 'month');
   const [showSearch, setShowSearch] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showImportExport, setShowImportExport] = useState(false);
   const [showNatural, setShowNatural] = useState(false);
-  const [syncing, setSyncing] = useState(false);
+  const { syncing, sync: handleSync, status: syncStatus, error: syncError } = useSyncStatus();
+  const [showSettings, setShowSettings] = useState(false);
 
   // DnD-State
   const [activeDrag, setActiveDrag] = useState<CalendarEvent | null>(null);
@@ -264,7 +267,7 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
       y = (rectOrMouse as React.MouseEvent).clientY;
     }
     setAnchorPos({ x, y });
-    setSelectedEvent(ev);
+    setSelectedEvent({...ev, can_write: calendars.find(c => c.id === ev.calendar_id)?.can_write ?? false});
   }
 
   function handleEventClickMouse(ev: CalendarEvent, e: React.MouseEvent) {
@@ -324,7 +327,8 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
   }, [view, currentDate]);
 
   const { events: serverEvents, loading: eventsLoading } = useEvents(!!user, from, to, refreshNonce);
-  const events = useMergedEvents(serverEvents);
+  const mergedEvents = useMergedEvents(serverEvents);
+  const events = useMemo(() => mergedEvents.map(ev => ({...ev, can_write: calendars.find(c => c.id === ev.calendar_id)?.can_write ?? false})), [mergedEvents, calendars]);
 
   const visibleCalendarIds = useMemo(
     () => new Set(calendars.filter((c) => isCalendarVisible(c.id)).map((c) => c.id)),
@@ -363,28 +367,11 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
     setCurrentDate(d);
   }
 
-  async function handleSync() {
-    if (syncing) return;
-    setSyncing(true);
-    try {
-      await fetch('/api/sync', {
-        method: 'POST',
-        credentials: 'include',
-      });
-    } catch {
-      // Fehler ignorieren — Refetch trotzdem
-    } finally {
-      setTimeout(() => {
-        setRefreshNonce((n) => n + 1);
-        setSyncing(false);
-      }, 800);
-    }
-  }
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const inInput = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
-      const anyModalOpen = !!document.querySelector('.natural-overlay, .event-form-overlay, .search-overlay, .event-popup, .recurring-move-overlay, .modal-backdrop');
+      const anyModalOpen = !!document.querySelector('.settings-dialog[open], .natural-overlay, .event-form-overlay, .search-overlay, .event-popup, .recurring-move-overlay, .modal-backdrop');
 
       // ⌘K → Suche (funktioniert auch aus Inputs)
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -572,6 +559,7 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
     newStart: Date,
     newEnd: Date
   ) {
+    if (ev.can_write === false) return;
     const newStartIso = toIsoLocal(newStart);
     const newEndIso = toIsoLocal(newEnd);
 
@@ -650,6 +638,7 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
   }
 
   async function executeResize(ev: CalendarEvent, mode: MoveMode, newEnd: Date) {
+    if (ev.can_write === false) return;
     const newEndIso = toIsoLocal(newEnd);
 
     // Optimistic update nur für nicht-rekurrente Events (siehe executeMove).
@@ -740,6 +729,7 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
           </div>
 
           <div className="topbar-right">
+            <button className="toolbar-btn" aria-label="Meine Einstellungen" title="Meine Einstellungen" onClick={() => setShowSettings(true)}>⚙</button>
             {/* Suche */}
             <button className="toolbar-btn" onClick={() => setShowSearch(true)} title="Suche (⌘K)">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
@@ -768,6 +758,8 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
             {eventsLoading && <span className="sync-indicator" title="Lädt…" />}
           </div>
         </header>
+        <div className="sync-status" role="status">{syncError || syncStatus?.error || (syncing ? "Synchronisation läuft …" : syncStatus?.last_success_at ? `Synchronisiert: ${new Date(syncStatus.last_success_at).toLocaleString("de-DE")}` : "Noch keine erfolgreiche Synchronisation")} <button type="button" onClick={handleSync} disabled={syncing}>Synchronisieren</button></div>
+        {showSettings && <SettingsDialog user={user} calendars={calendars} onClose={() => setShowSettings(false)} onSaved={setView} />}
 
         <div className="main">
           <Sidebar
@@ -984,8 +976,8 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
 
         {showNatural && (
           <NaturalInputBar
-            calendars={calendars}
-            defaultCalendarId={calendars.find((c) => c.name === 'Persönlich')?.id}
+            calendars={calendars.filter(c => c.can_write !== false)}
+            defaultCalendarId={calendars.find(c => c.id === user.default_calendar_id && c.can_write !== false)?.id}
             onConfirm={async (parsed: import('./utils/naturalParser').ParsedEvent & { calendar_id: string }) => {
               const { uid } = await createEvent({
                 calendar_id: parsed.calendar_id,
@@ -1006,6 +998,7 @@ function CalendarApp({ user, handleLogout }: { user: AuthUser; handleLogout: () 
                 location: parsed.location ?? undefined,
                 etag: null,
                 description: null,
+                reminders: user.default_reminder_minutes != null ? [user.default_reminder_minutes] : [],
                 rrule: parsed.rrule ?? null,
                 is_recurring: !!parsed.rrule,
               };

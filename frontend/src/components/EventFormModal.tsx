@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createEvent, updateEvent } from "../api/write";
+import { useStore } from "../store";
 import { useToast } from "./Toast";
 import type { CalendarEvent, CreateEventPayload, WriteError } from "../types";
 
@@ -13,6 +14,7 @@ interface Calendar {
   id: string;
   name: string;
   color: string;
+  can_write?: boolean;
 }
 
 interface BaseProps {
@@ -132,16 +134,17 @@ function makeDefaultStart(defaultDate?: string): string {
   );
 }
 
-function addHour(localDatetime: string): string {
-  const [date, time] = localDatetime.split("T");
-  const [h, m] = time.split(":").map(Number);
-  const next = h + 1;
-  if (next > 23) return `${date}T23:${String(m).padStart(2, "0")}`;
-  return `${date}T${String(next).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+function addHour(localDatetime: string, minutes = 60): string {
+  const date = new Date(localDatetime);
+  date.setMinutes(date.getMinutes() + minutes);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function describeWriteError(err: WriteError): string {
   switch (err.type) {
+    case "bad_request":
+      return err.message;
     case "conflict":
       return "Der Termin wurde zwischenzeitlich extern geändert. Bitte Seite neu laden.";
     case "not_found":
@@ -543,13 +546,15 @@ function DateTimeField({
 // ── Hauptkomponente ───────────────────────────────────────────────────────────
 
 export function EventFormModal({
-  calendars,
+  calendars: allCalendars,
   events = [],
   onClose,
   onSaved,
   ...props
 }: Props) {
   const { showToast } = useToast();
+  const user = useStore(s => s.user);
+  const calendars = allCalendars.filter(c => c.can_write !== false);
 
   const isEdit = props.mode === "edit";
   const existingEvent = isEdit ? props.event : undefined;
@@ -570,16 +575,17 @@ export function EventFormModal({
     ? prefillEvent.all_day
       ? toLocalDateValue(prefillEvent.end, true)
       : toLocalDatetimeValue(prefillEvent.end)
-    : addHour(defaultStartStr);
+    : addHour(defaultStartStr, user?.default_duration_minutes);
 
   const defaultCalId = prefillEvent
     ? prefillEvent.calendar_id
     : props.mode === "create" && props.defaultCalendarId
       ? props.defaultCalendarId
-      : (calendars[0]?.id ?? "");
+      : (calendars.find(c => c.id === user?.default_calendar_id)?.id ?? calendars[0]?.id ?? "");
 
   const [summary, setSummary] = useState(prefillEvent?.summary ?? "");
-  const [calendarId, setCalendarId] = useState(defaultCalId);
+  const [calendarId, setCalendarId] = useState(calendars.some(c => c.id === defaultCalId) ? defaultCalId : calendars[0]?.id ?? "");
+  const [reminders, setReminders] = useState<number[]>(prefillEvent?.reminders ?? (user?.default_reminder_minutes != null ? [user.default_reminder_minutes] : []));
   const [allDay, setAllDay] = useState(prefillEvent?.all_day ?? false);
   const [startStr, setStartStr] = useState(defaultStartStr);
   const [endStr, setEndStr] = useState(defaultEndStr);
@@ -625,7 +631,7 @@ export function EventFormModal({
 
   const handleStartChange = (val: string) => {
     setStartStr(val);
-    if (!allDay && val > endStr) setEndStr(addHour(val));
+    if (!allDay && val > endStr) setEndStr(addHour(val, user?.default_duration_minutes));
     if (allDay && val > endStr) setEndStr(val);
   };
 
@@ -644,6 +650,7 @@ export function EventFormModal({
     all_day: allDay,
     location: location.trim() || null,
     description: description.trim() || null,
+    reminders,
     rrule: buildRrule(recurFreq, recurUntil, recurCount, recurExtraParts),
   });
 
@@ -709,6 +716,7 @@ export function EventFormModal({
           all_day: payload.all_day ?? false,
           location: payload.location ?? undefined,
           description: payload.description,
+          reminders: payload.reminders,
           etag: null,
           is_recurring: !!payload.rrule,
         };
@@ -732,6 +740,9 @@ export function EventFormModal({
     endStr,
     location,
     description,
+    reminders,
+    recurCount,
+    recurExtraParts,
     recurFreq,
     recurUntil,
     isEdit,
@@ -742,7 +753,7 @@ export function EventFormModal({
     onClose,
   ]);
 
-  const canSave = summary.trim().length > 0 && calendarId;
+  const canSave = summary.trim().length > 0 && calendars.some(c => c.id === calendarId);
 
   if (editScope === null) {
     return (
@@ -961,6 +972,15 @@ export function EventFormModal({
 
         {/* Beschreibung */}
         <div className="form-field">
+          <fieldset className="reminder-options">
+            <legend className="form-label">Erinnerungen</legend>
+            {[...new Set([0,5,15,30,60,1440,10080,...reminders])].sort((a,b) => a-b).map(n => <label key={n}>
+              <input type="checkbox" checked={reminders.includes(n)} disabled={!reminders.includes(n) && reminders.length >= 5} onChange={e => setReminders(e.target.checked ? [...reminders,n] : reminders.filter(value => value !== n))} />
+              {n === 0 ? "Zum Beginn" : n >= 1440 ? `${n/1440} Tage vorher` : `${n} Minuten vorher`}
+            </label>)}
+          </fieldset>
+          <p className="form-hint">Bis zu fünf Erinnerungen über deine verbundene Kalender-App.</p>
+          {calendars.length === 0 && <p role="alert">Kein beschreibbarer Kalender verfügbar.</p>}
           <label className="form-label" htmlFor="event-description">
             Beschreibung
           </label>

@@ -82,6 +82,7 @@ function eventToPayload(ev: CalendarEvent): CreateEventPayload {
     all_day: ev.all_day,
     location: ev.location ?? null,
     description: ev.description ?? null,
+    reminders: ev.reminders,
     rrule: ev.rrule ?? null,
   };
 }
@@ -95,6 +96,7 @@ function eventToUpdatePayload(ev: CalendarEvent, etag: string): UpdateEventPaylo
     all_day: ev.all_day,
     location: ev.location ?? null,
     description: ev.description ?? null,
+    reminders: ev.reminders,
     rrule: ev.rrule ?? null,
   };
 }

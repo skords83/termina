@@ -102,7 +102,8 @@ def test_invalid_propfind_is_not_empty_success(xml):
         sync._propfind_etags(client, 'https://example.invalid/cal')
 
 
-def test_scheduler_has_next_periodic_run(monkeypatch):
+def test_scheduler_has_next_periodic_run(monkeypatch, db):
+    monkeypatch.setattr("app.db.session.SessionLocal", lambda: db)
     from apscheduler.schedulers.background import BackgroundScheduler
     monkeypatch.setattr(scheduler, '_scheduler', BackgroundScheduler())
     monkeypatch.setattr(scheduler, 'run_sync', lambda: None)

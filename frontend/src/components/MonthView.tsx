@@ -76,6 +76,7 @@ function DraggableEvent({
   onClick: (e: React.MouseEvent) => void;
 }) {
   const { setNodeRef, listeners, attributes, isDragging } = useDraggable({
+    disabled: ev.can_write === false,
     id: `month-event-${ev.uid}-${dayKey}`,
     data: { event: ev, sourceDayKey: dayKey, source: 'month' },
   });

@@ -12,6 +12,7 @@ from icalendar.prop import vRecur
 from caldav import DAVClient
 
 from app.config import settings
+from app.reminders import set_reminders, copy_alarms
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +189,7 @@ def _make_ical(
     location: str | None,
     description: str | None,
     rrule: str | None = None,
+    reminders: list[int] | None = None,
 ) -> bytes:
     cal = Calendar()
     cal.add("prodid", "-//Termina//termina//EN")
@@ -215,6 +217,8 @@ def _make_ical(
     if rrule_parsed is not None:
         ev.add("rrule", rrule_parsed)
 
+    if reminders is not None:
+        set_reminders(ev, reminders)
     cal.add_component(ev)
     return cal.to_ical()
 
@@ -263,9 +267,10 @@ def create_event(
     location: str | None = None,
     description: str | None = None,
     rrule: str | None = None,
+    reminders: list[int] | None = None,
 ) -> str:
     uid = str(uuid.uuid4())
-    ical_data = _make_ical(uid, summary, start, end, all_day, location, description, rrule)
+    ical_data = _make_ical(uid, summary, start, end, all_day, location, description, rrule, reminders)
 
     logger.debug(
         "create_event: all_day=%s start=%s end=%s payload=\n%s",
@@ -311,10 +316,11 @@ def update_event(
     description: str | None = None,
     rrule: str | None = None,
     recurrence_id: datetime | None = None,
+    reminders: list[int] | None = None,
 ) -> None:
     """
     Zwei Pfade:
-      1. recurrence_id is None: Master-Event ersetzen (komplette .ics neu schreiben).
+      1. recurrence_id is None: Master-Felder aktualisieren, Alarme und Ausnahmen erhalten.
       2. recurrence_id given: Override-VEVENT für diese Instanz in bestehende .ics einfügen
          (Master mit RRULE bleibt erhalten).
     """
@@ -333,9 +339,20 @@ def update_event(
             raise ConflictError(f"ETag-Konflikt für Event {uid}")
 
         if recurrence_id is None:
-            # Pfad 1: Master ersetzen
-            ical_data = _make_ical(uid, summary, start, end, all_day, location, description, rrule)
-            obj.data = ical_data
+            # Update known fields while preserving alarms, exceptions and metadata.
+            ical = Calendar.from_ical(obj.data)
+            master = _find_master(ical)
+            if master is None:
+                raise ValueError("Kein Master-VEVENT gefunden")
+            replacement = _find_master(Calendar.from_ical(
+                _make_ical(uid, summary, start, end, all_day, location, description, rrule)))
+            for key in ("SUMMARY", "DTSTART", "DTEND", "DURATION", "LOCATION", "DESCRIPTION", "RRULE", "DTSTAMP"):
+                master.pop(key, None)
+                if key in replacement:
+                    master[key] = replacement[key]
+            if reminders is not None:
+                set_reminders(master, reminders)
+            obj.data = ical.to_ical()
         else:
             # Pfad 2: Override für eine Instanz einfügen
             ical = Calendar.from_ical(obj.data)
@@ -350,6 +367,7 @@ def update_event(
                     continue
                 if _dt_equal(rid.dt, recurrence_id):
                     to_remove.append(sub)
+            alarm_source = to_remove[0] if to_remove else _find_master(ical)
             for sub in to_remove:
                 ical.subcomponents.remove(sub)
 
@@ -375,6 +393,9 @@ def update_event(
             if description:
                 override.add("DESCRIPTION", description)
 
+            copy_alarms(alarm_source, override)
+            if reminders is not None:
+                set_reminders(override, reminders)
             ical.add_component(override)
             obj.data = ical.to_ical()
 
@@ -423,6 +444,7 @@ def move_event_calendar(
     all_day: bool = False,
     location: str | None = None,
     description: str | None = None,
+    reminders: list[int] | None = None,
 ) -> None:
     """Verschiebt ein nicht-wiederkehrendes Event in einen anderen Kalender.
 
@@ -452,7 +474,12 @@ def move_event_calendar(
         if _find_caldav_event(new_cal, uid) is not None:
             raise ConflictError("Im Zielkalender existiert bereits ein Termin mit dieser UID")
 
-        ical_data = _make_ical(uid, summary, start, end, all_day, location, description, rrule=None)
+        moved = Calendar.from_ical(_make_ical(uid, summary, start, end, all_day, location, description, rrule=None))
+        moved_master = _find_master(moved)
+        copy_alarms(_find_master(Calendar.from_ical(old_obj.data)), moved_master)
+        if reminders is not None:
+            set_reminders(moved_master, reminders)
+        ical_data = moved.to_ical()
 
         _caldav_op_with_retry(
             lambda: new_cal.save_event(ical_data),
@@ -816,10 +843,12 @@ def _apply_move_single(
             continue
         if _dt_equal(rid.dt, recurrence_id):
             to_remove.append(sub)
+    alarm_source = to_remove[-1] if to_remove else master
     for sub in to_remove:
         ical.subcomponents.remove(sub)
 
     override = ICalEvent()
+    copy_alarms(alarm_source, override)
     override.add("UID", uid)
 
     if "SUMMARY" in master:
@@ -930,6 +959,7 @@ def _apply_move_future(
     new_cal.add("version", "2.0")
 
     new_ev = ICalEvent()
+    copy_alarms(master, new_ev)
     new_ev.add("uid", new_uid)
     new_ev.add("dtstamp", datetime.now(timezone.utc))
     if "SUMMARY" in master:
@@ -968,6 +998,7 @@ def update_event_future(
     location: str | None,
     description: str | None,
     recurrence_id: datetime,
+    reminders: list[int] | None = None,
 ) -> str:
     """
     Trennt die Serie an recurrence_id (UNTIL im alten Master) und legt ein neues
@@ -1022,6 +1053,9 @@ def update_event_future(
         fresh_rrule = _strip_rrule_keys(rrule, {"UNTIL", "COUNT"})
         new_ev.add("rrule", fresh_rrule)
 
+        copy_alarms(master, new_ev)
+        if reminders is not None:
+            set_reminders(new_ev, reminders)
         new_cal.add_component(new_ev)
         _caldav_op_with_retry(
             lambda: cal.save_event(new_cal.to_ical()),

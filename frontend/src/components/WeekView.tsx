@@ -94,6 +94,7 @@ function DraggableWeekEvent({
   onEventResize: (event: CalendarEvent, newEnd: Date) => void;
 }) {
   const { setNodeRef, listeners, attributes, isDragging } = useDraggable({
+    disabled: ev.can_write === false,
     id: `week-event-${ev.uid}-${ev.recurrence_id ?? ev.start}`,
     data: { event: ev, source: 'week' },
   });
@@ -103,6 +104,7 @@ function DraggableWeekEvent({
   const resizeBaseHeight = useRef(0);
 
   const handleResizeStart = (e: React.PointerEvent) => {
+    if (ev.can_write === false) return;
     e.stopPropagation();
     e.preventDefault();
     resizeStartY.current = e.clientY;

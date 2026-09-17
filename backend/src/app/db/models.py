@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -14,6 +14,7 @@ class Calendar(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)  # CalDAV URL
     name: Mapped[str] = mapped_column(String, nullable=False)
     color: Mapped[str | None] = mapped_column(String, nullable=True)
+    read_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     ctag: Mapped[str | None] = mapped_column(String, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -42,6 +43,7 @@ class Event(Base):
     rrule: Mapped[str | None] = mapped_column(String, nullable=True)
     location: Mapped[str | None] = mapped_column(String, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reminders: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list)
     raw_ical: Mapped[str | None] = mapped_column(Text, nullable=True)
     birth_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -81,6 +83,8 @@ class EventOverride(Base):
     location: Mapped[str | None] = mapped_column(String, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    reminders: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
+
     master: Mapped["Event"] = relationship("Event", back_populates="overrides")
 
     __table_args__ = (
@@ -101,6 +105,11 @@ class User(Base):
     locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    default_calendar_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    default_duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    default_view: Mapped[str] = mapped_column(String, nullable=False, default="month")
+    default_reminder_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     calendar_access: Mapped[list["UserCalendarAccess"]] = relationship(
         "UserCalendarAccess", back_populates="user", cascade="all, delete-orphan"
@@ -133,7 +142,19 @@ class UserCalendarAccess(Base):
         String, ForeignKey("calendars.id", ondelete="CASCADE"), primary_key=True
     )
 
+    can_write: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
     user: Mapped["User"] = relationship("User", back_populates="calendar_access")
+
+
+class SyncState(Base):
+    __tablename__ = "sync_state"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    running: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class EventShare(Base):

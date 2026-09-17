@@ -15,6 +15,7 @@ from icalendar import Calendar, Event as ICalEvent
 from icalendar.prop import vRecur
 
 from app.db.models import Event, EventOverride
+from app.reminders import set_reminders
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,7 @@ def build_export_calendar(
         if event.description:
             ev.add("description", event.description)
 
+        set_reminders(ev, event.reminders or [])
         override_comps: list[ICalEvent] = []
         exdates: list[datetime] = []
 
@@ -115,6 +117,7 @@ def build_export_calendar(
                 desc = ov.description or event.description
                 if desc:
                     ov_ev.add("description", desc)
+                set_reminders(ov_ev, ov.reminders if ov.reminders is not None else (event.reminders or []))
                 override_comps.append(ov_ev)
 
             if exdates:

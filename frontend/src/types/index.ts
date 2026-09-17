@@ -2,12 +2,16 @@ export interface Calendar {
   id: string;
   name: string;
   color: string;
+  can_write?: boolean;
+  read_only?: boolean;
 }
 
 export interface CalendarEvent {
   uid: string;
   calendar_id: string;
   summary: string;
+  reminders?: number[];
+  can_write?: boolean;
   start: string; // ISO 8601
   end: string;
   all_day: boolean;
@@ -23,6 +27,7 @@ export interface CalendarEvent {
 export interface CreateEventPayload {
   calendar_id: string;
   summary: string;
+  reminders?: number[];
   start: string;
   end: string;
   all_day?: boolean;
@@ -34,6 +39,7 @@ export interface CreateEventPayload {
 export interface UpdateEventPayload {
   etag: string;
   summary: string;
+  reminders?: number[];
   start: string;
   end: string;
   all_day?: boolean;

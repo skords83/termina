@@ -12,6 +12,14 @@ _scheduler = BackgroundScheduler()
 
 
 def start_scheduler() -> None:
+    from app.db.session import SessionLocal
+    from app.db.models import SyncState
+    with SessionLocal() as db:
+        state = db.get(SyncState, 1)
+        if state is not None and state.running:
+            state.running = False
+            state.error = "Die letzte Synchronisation wurde unterbrochen."
+            db.commit()
     _scheduler.add_job(
         run_sync,
         trigger=IntervalTrigger(seconds=settings.sync_interval_seconds),

@@ -9,6 +9,7 @@ interface AdminUser {
   must_change_password: boolean;
   last_login_at: string | null;
   calendar_ids: string[];
+  writable_calendar_ids: string[];
 }
 
 interface Props {
@@ -23,6 +24,7 @@ const ROLES = [
 ];
 
 export default function AdminUsersPage({ calendars, onClose }: Props) {
+  const [accessBusy, setAccessBusy] = useState(false);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -110,25 +112,27 @@ export default function AdminUsersPage({ calendars, onClose }: Props) {
     }
   }
 
-  async function handleToggleCalendar(u: AdminUser, calendarId: string) {
-    const has = u.calendar_ids.includes(calendarId);
-    const nextIds = has
-      ? u.calendar_ids.filter((id) => id !== calendarId)
-      : [...u.calendar_ids, calendarId];
+  async function handleToggleCalendar(u: AdminUser, calendarId: string, access: string) {
+    if (accessBusy) return;
+    setAccessBusy(true);
+    const nextIds = u.calendar_ids.filter(id => id !== calendarId);
+    if (access !== "none") nextIds.push(calendarId);
+    const writable = u.writable_calendar_ids.filter(id => id !== calendarId);
+    if (access === "write") writable.push(calendarId);
 
     try {
       const res = await fetch(`/api/admin/users/${u.id}/calendar-access`, {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ calendar_ids: nextIds }),
+        body: JSON.stringify({ calendar_ids: nextIds, writable_calendar_ids: writable }),
       });
       if (!res.ok) throw new Error();
       const updated = await res.json();
       setUsers((prev) => prev.map((x) => (x.id === u.id ? updated : x)));
     } catch {
       setError('Kalender-Zuordnung konnte nicht gespeichert werden.');
-    }
+    } finally { setAccessBusy(false); }
   }
 
   return (
@@ -178,6 +182,7 @@ export default function AdminUsersPage({ calendars, onClose }: Props) {
               ))}
             </select>
           </div>
+          <p>Neue Kalenderfreigaben erlauben zunächst nur Lesen. Bearbeitungsrechte kannst du anschließend unten vergeben.</p>
           <div className="admin-calendar-checks">
             {calendars.map((c) => (
               <label key={c.id} className="admin-calendar-check">
@@ -211,11 +216,9 @@ export default function AdminUsersPage({ calendars, onClose }: Props) {
                 <div className="admin-calendar-checks">
                   {calendars.map((c) => (
                     <label key={c.id} className="admin-calendar-check">
-                      <input
-                        type="checkbox"
-                        checked={u.calendar_ids.includes(c.id)}
-                        onChange={() => handleToggleCalendar(u, c.id)}
-                      />
+                      <select aria-label={`Zugriff auf ${c.name} für ${u.display_name}`} disabled={accessBusy} value={!u.calendar_ids.includes(c.id) ? "none" : !c.read_only && u.writable_calendar_ids.includes(c.id) ? "write" : "read"} onChange={e => handleToggleCalendar(u, c.id, e.target.value)}>
+                        <option value="none">Kein Zugriff</option><option value="read">Nur lesen</option>{!c.read_only && <option value="write">Bearbeiten</option>}
+                      </select>
                       {c.name}
                     </label>
                   ))}

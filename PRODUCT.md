@@ -6,7 +6,7 @@ product
 
 ## Users
 
-Just the developer/owner — a self-hosted calendar built for one person's own daily workflow, syncing against their personal Nextcloud via CalDAV. Not designed for onboarding strangers or a household right now; optimize for the owner's taste and speed over broad legibility.
+A household sharing schedules through a self-hosted Nextcloud calendar. Adults and children have individual accounts, personal defaults, and explicit read or write access to calendars. Keep everyday planning quick and understandable; administration belongs in the admin area.
 
 ## Product Purpose
 

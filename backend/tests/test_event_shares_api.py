@@ -64,7 +64,7 @@ def setup_db(monkeypatch):
 @pytest.fixture()
 def client(monkeypatch):
     monkeypatch.setitem(app.dependency_overrides, get_db, override_get_db)
-    monkeypatch.setattr("app.caldav.sync.run_sync", lambda: None)
+    monkeypatch.setattr("app.api.event_shares.run_sync", lambda: None)
     monkeypatch.setattr("app.scheduler.run_sync", lambda: None)
     return TestClient(app)
 

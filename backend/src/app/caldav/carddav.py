@@ -258,8 +258,11 @@ def _sync_birthdays(db: Session, client: Any) -> None:
         return
 
     db_cal = db.get(Calendar, BIRTHDAYS_CALENDAR_ID)
+    if db_cal is not None:
+        db_cal.read_only = True
     if db_cal is None:
         db_cal = Calendar(
+            read_only=True,
             id=BIRTHDAYS_CALENDAR_ID,
             name=BIRTHDAYS_CALENDAR_NAME,
             color=settings.birthdays_calendar_color,

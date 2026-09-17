@@ -13,7 +13,7 @@ from app.auth.security import (
 )
 from app.config import settings
 from app.db import session as db_session
-from app.db.models import User, UserCalendarAccess, UserSession
+from app.db.models import Calendar, User, UserCalendarAccess, UserSession
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ def delete_session(db: Session, raw_token: str) -> None:
     db.commit()
 
 
-def create_user(db: Session, email: str, display_name: str, role: str, calendar_ids: list[str]) -> tuple[User, str]:
+def create_user(db: Session, email: str, display_name: str, role: str, calendar_ids: list[str], writable_calendar_ids: list[str] | None = None) -> tuple[User, str]:
     temp_password = generate_temp_password()
     user = User(
         email=email,
@@ -89,7 +89,7 @@ def create_user(db: Session, email: str, display_name: str, role: str, calendar_
     )
     db.add(user)
     db.flush()
-    _set_calendar_access(db, user, calendar_ids)
+    _set_calendar_access(db, user, calendar_ids, writable_calendar_ids)
     db.commit()
     db.refresh(user)
     return user, temp_password
@@ -113,15 +113,16 @@ def change_password(db: Session, user: User, new_password: str) -> None:
     db.commit()
 
 
-def set_calendar_access(db: Session, user: User, calendar_ids: list[str]) -> None:
-    _set_calendar_access(db, user, calendar_ids)
+def set_calendar_access(db: Session, user: User, calendar_ids: list[str], writable_calendar_ids: list[str] | None = None) -> None:
+    _set_calendar_access(db, user, calendar_ids, writable_calendar_ids)
     db.commit()
 
 
-def _set_calendar_access(db: Session, user: User, calendar_ids: list[str]) -> None:
+def _set_calendar_access(db: Session, user: User, calendar_ids: list[str], writable_calendar_ids: list[str] | None = None) -> None:
     db.query(UserCalendarAccess).filter(UserCalendarAccess.user_id == user.id).delete()
-    for calendar_id in calendar_ids:
-        db.add(UserCalendarAccess(user_id=user.id, calendar_id=calendar_id))
+    for calendar_id in dict.fromkeys(calendar_ids):
+        db.add(UserCalendarAccess(user_id=user.id, calendar_id=calendar_id,
+                                  can_write=writable_calendar_ids is None or calendar_id in writable_calendar_ids))
 
 
 def accessible_calendar_ids(db: Session, user: User) -> list[str] | None:
@@ -136,6 +137,22 @@ def ensure_calendar_access(db: Session, user: User, calendar_id: str) -> None:
     accessible = accessible_calendar_ids(db, user)
     if accessible is not None and calendar_id not in accessible:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Kein Zugriff auf diesen Kalender")
+
+
+def writable_calendar_ids(db: Session, user: User) -> set[str]:
+    q = db.query(Calendar.id).filter(Calendar.read_only.is_(False))
+    if user.role != "admin":
+        q = q.join(UserCalendarAccess, Calendar.id == UserCalendarAccess.calendar_id).filter(
+            UserCalendarAccess.user_id == user.id, UserCalendarAccess.can_write.is_(True))
+    return {row[0] for row in q.all()}
+
+
+def ensure_calendar_write(db: Session, user: User, calendar_id: str) -> None:
+    ensure_calendar_access(db, user, calendar_id)
+    if db.get(Calendar, calendar_id) is None:
+        raise HTTPException(status_code=404, detail="Kalender nicht gefunden")
+    if calendar_id not in writable_calendar_ids(db, user):
+        raise HTTPException(status_code=403, detail="Dieser Kalender ist nur lesbar")
 
 
 def bootstrap_initial_admin() -> None:

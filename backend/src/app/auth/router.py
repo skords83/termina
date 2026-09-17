@@ -31,6 +31,10 @@ class UserOut(BaseModel):
     display_name: str
     role: str
     must_change_password: bool
+    default_calendar_id: str | None = None
+    default_duration_minutes: int = 60
+    default_view: str = "month"
+    default_reminder_minutes: int | None = None
 
     model_config = {"from_attributes": True}
 
