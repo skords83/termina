@@ -525,8 +525,8 @@ function DateTimeField({
   }
 
   return (
-    <div style={{ display: "flex", gap: "6px" }}>
-      <div style={{ flex: 1 }}>
+    <div className="event-datetime-fields">
+      <div className="event-date-field">
         <DatePicker
           value={datePart}
           min={minDate}
@@ -840,7 +840,7 @@ export function EventFormModal({
               className="event-calendar-choice" aria-pressed={calendarId === cal.id}
               disabled={isEdit && existingEvent?.is_recurring}
               onClick={() => { setCalendarId(cal.id); summaryRef.current?.focus(); }}>
-              <span className="event-calendar-dot" style={{ background: cal.color }} />{cal.name}
+              <span className="event-calendar-dot" style={{ background: cal.color }} /><span className="event-calendar-name">{cal.name}</span>
             </button>)}
           </div>
           {!calendars.length && <p role="alert">Kein beschreibbarer Kalender verfügbar.</p>}
@@ -880,7 +880,7 @@ export function EventFormModal({
           </div>
           <div className="form-date-row">
             <span className="form-date-row-label">Datum{!allDay && " / Beginn"}</span>
-            <div style={{ flex: 1 }}>
+            <div className="event-date-field">
               <DateTimeField
                 value={startStr}
                 allDay={allDay}
@@ -890,13 +890,18 @@ export function EventFormModal({
           </div>
           {!allDay && !isEdit ? <div className="form-date-row">
             <label className="form-date-row-label" htmlFor="event-duration">Dauer</label>
-            <input id="event-duration" type="number" min="1" step="1" className="form-input event-duration" value={duration}
+            <div className="event-duration-fields">
+            <div className="event-duration-input">
+            <input id="event-duration" type="number" min="1" step="1" aria-describedby="event-duration-unit event-end-time" className="form-input event-duration" value={duration}
               onChange={e => { const minutes = Number(e.target.value); setDuration(minutes); if (minutes > 0 && startStr) setEndStr(addHour(startStr, minutes)); }} />
-            <span className="form-hint">Min. · Ende {endStr.slice(11,16)}{endStr.slice(0,10) !== startStr.slice(0,10) ? ` (${endStr.slice(0,10)})` : ""}</span>
+            <span id="event-duration-unit">Minuten</span>
+            </div>
+            <span id="event-end-time" className="event-end-time">Ende <strong>{endStr.slice(11,16)} Uhr</strong>{endStr.slice(0,10) !== startStr.slice(0,10) ? ` (${endStr.slice(0,10).split("-").reverse().join(".")})` : ""}</span>
+            </div>
           </div> : <>
           <div className="form-date-row">
             <span className="form-date-row-label">Bis</span>
-            <div style={{ flex: 1 }}>
+            <div className="event-date-field">
               <DateTimeField
                 value={endStr}
                 allDay={allDay}

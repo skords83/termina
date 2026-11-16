@@ -1298,26 +1298,38 @@
 .event-form > .form-modal-header, .event-form > .form-modal-footer { flex-shrink: 0; }
 .event-form-body { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 2px; }
 .event-calendars { border: 0; padding: 0; margin: 0; min-width: 0; }
-.event-calendar-list { display: flex; gap: 6px; overflow-x: auto; padding: 6px 2px; }
-.event-calendar-choice { display: flex; align-items: center; gap: 6px; flex-shrink: 0; border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; background: var(--bg-3); color: var(--text); font: inherit; font-size: 13px; }
-.event-calendar-choice[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-dim); }
+.event-calendar-list { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 0; }
+.event-calendar-choice { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 44px; border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 9px; text-align: left; background: var(--bg-3); color: var(--text); font: inherit; font-size: 13px; }
+.event-calendar-name { min-width: 0; overflow-wrap: anywhere; }
+.event-calendar-choice[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-dim); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
 .event-calendar-choice:focus-visible, .event-more-options summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .event-calendar-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.event-datetime-fields { display: flex; gap: 6px; min-width: 0; }
+.event-date-field { flex: 1; min-width: 0; }
+.event-duration-fields { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.event-duration-input { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .event-duration { width: 76px; }
+.event-end-time { font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+.event-end-time strong { color: var(--text); font-weight: 600; white-space: nowrap; }
+.event-form .form-input, .event-form .date-picker-trigger { min-height: 44px; }
+.event-form .form-time-input { width: 110px; }
+.event-form .form-modal-footer button { min-height: 44px; }
+.event-form .form-toggle { min-height: 44px; }
+.event-form .event-more-options summary { min-height: 44px; box-sizing: border-box; padding: 12px 0; }
 .event-more-options summary { cursor: pointer; font-size: 13px; padding: 6px 0; }
 .event-more-options summary .form-hint { display: block; color: var(--text-2); margin-top: 4px; }
 .event-more-options[open] { display: flex; flex-direction: column; }
 .event-more-options[open] > .form-section, .event-more-options[open] > .form-field { margin-top: 14px; }
-.event-form .form-date-row-label { width: 72px; flex-shrink: 0; }
+.event-form .form-date-row-label { width: 104px; flex-shrink: 0; white-space: nowrap; }
 @media (max-width: 480px) {
   .event-form { padding: 12px; max-height: calc(100dvh - 12px); gap: 8px; }
   .event-form-body { gap: 10px; }
   .event-form input, .event-form textarea { font-size: 16px; }
 }
-.event-form-backdrop { padding: 6px; bottom: auto; height: 100dvh; }
+.modal-backdrop.event-form-backdrop { padding: 6px; bottom: auto; height: 100dvh; }
 .event-form-backdrop .event-form { max-height: calc(100% - 12px); }
 @media (max-width: 480px) {
-  .event-form .form-date-row:has(.date-picker) { flex-wrap: wrap; gap: 6px; }
-  .event-form .form-date-row:has(.date-picker) > .form-date-row-label { width: 100%; }
+  .event-form .form-date-row { flex-wrap: wrap; gap: 6px; }
+  .event-form .form-date-row > .form-date-row-label { width: 100%; }
   .event-form .form-date-row > div { min-width: 0; }
 }

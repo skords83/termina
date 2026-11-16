@@ -17,17 +17,22 @@ Geprüft: beide Beispieltermine, 60-Minuten-Vorgabe, persönliche Dauer und Erin
 geänderte Dauer und Beginn, Tageswechsel, Ganztag, zusätzlicher Kalender und
 Ausschluss von Lesekalendern, Wiederholung, unveränderte verborgene Angaben bei
 Serienbearbeitung (inklusive mehrtägigem Ganztag), Titelfokus und Tab-Begrenzung.
-Screenshots entstehen unter `/tmp/termina-*.png` für 1280×800, 375×667,
-320×568 und 375×360 (reduzierte Höhe). Die normalen kompakten Ansichten werden
-auf scrollfreie Felder und sichtbare Aktionen geprüft; bei geöffneten Optionen
-und reduzierter Höhe bleiben die Aktionen außerhalb des scrollenden Inhalts.
+Screenshots entstehen unter `/tmp/termina-*.png`. Die Layoutmatrix prüft
+1280×800, 320×568, 360×667, 390×667 und 320×360 jeweils mit vier sowie fünf
+beschreibbaren Kalendern und zusätzlich langen Namen (auch ohne Leerzeichen).
+`termina-layout-*` zeigt die Kalenderauswahl, `termina-fields-*` die bei Bedarf
+vertikal gescrollten Felder. Die Prüfung misst horizontale Überläufe, kontrolliert
+44-Pixel-Touchflächen der Kalender, den exklusiven Auswahlzustand, geschlossene
+Zusatzoptionen und sichtbare Aktionen. Geöffnete Optionen und Datumsauswahl
+werden ebenfalls geprüft. Vertikales Scrollen bei wenig Platz ist erlaubt.
 
-Prüfung am 16.11.2026: Browserlauf erfolgreich, Screenshots visuell kontrolliert;
-103 Frontendtests, 183 Backendtests und Frontendbuild erfolgreich.
-`npm audit --audit-level=moderate`: keine Befunde, einschließlich Entwicklungsabhängigkeiten.
-Das Lockfile aktualisiert Vite auf 8.3.8, Vitest/Mocker auf 5.1.0 und
-source-map-js auf 1.2.2 innerhalb der bestehenden Versionsbereiche.
-Die vier ursprünglichen Audit-Befunde sind damit behoben.
+Prüfung am 16.11.2026 nach der Layoutüberarbeitung: Browserlauf erfolgreich;
+Screenshots aller Layoutvarianten sowie der gescrollten Felder und geöffneten
+Optionen visuell kontrolliert. Keine horizontalen Überläufe oder abgeschnittenen
+Namen; Uhrzeitfeld für vollständige Darstellung bei mobiler Schriftgröße verbreitert.
+103 Frontendtests und Produktionsbuild erfolgreich. Die Kalenderzahl basiert auf
+der vorhandenen Fixture, da im Auftrag kein Screenshot angehängt war.
+Backend und Terminlogik wurden bei dieser Layoutänderung nicht verändert.
 
 Nicht geprüft: reale iOS-/Android-Bildschirmtastatur und physische Touchgeräte,
 echter Nextcloud-/CalDAV-Schreibzugriff. Die reduzierte Browserhöhe simuliert nur
