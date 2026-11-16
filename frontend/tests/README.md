@@ -24,10 +24,10 @@ und reduzierter Höhe bleiben die Aktionen außerhalb des scrollenden Inhalts.
 
 Prüfung am 16.11.2026: Browserlauf erfolgreich, Screenshots visuell kontrolliert;
 103 Frontendtests, 183 Backendtests und Frontendbuild erfolgreich.
-`npm audit --omit=dev`: keine Befunde. Vollständiger `npm audit`: vier bereits
-im Hauptbranch vorhandene Befunde in Entwicklungsabhängigkeiten (2 moderat,
-2 hoch; Vitest/Mocker, source-map-js, Vite). Abhängigkeiten bleiben in diesem
-auf die Terminerfassung begrenzten PR unverändert.
+`npm audit --audit-level=moderate`: keine Befunde, einschließlich Entwicklungsabhängigkeiten.
+Das Lockfile aktualisiert Vite auf 8.3.8, Vitest/Mocker auf 5.1.0 und
+source-map-js auf 1.2.2 innerhalb der bestehenden Versionsbereiche.
+Die vier ursprünglichen Audit-Befunde sind damit behoben.
 
 Nicht geprüft: reale iOS-/Android-Bildschirmtastatur und physische Touchgeräte,
 echter Nextcloud-/CalDAV-Schreibzugriff. Die reduzierte Browserhöhe simuliert nur
