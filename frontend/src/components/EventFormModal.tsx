@@ -536,6 +536,7 @@ function DateTimeField({
       </div>
       <input
         type="time"
+        aria-label="Uhrzeit"
         value={timePart}
         disabled={disabled}
         onChange={(e) => handleTimeChange(e.target.value)}
@@ -587,7 +588,9 @@ export function EventFormModal({
 
   const [summary, setSummary] = useState(prefillEvent?.summary ?? "");
   const [calendarId, setCalendarId] = useState(calendars.some(c => c.id === defaultCalId) ? defaultCalId : calendars[0]?.id ?? "");
-  const [reminders, setReminders] = useState<number[]>(prefillEvent?.reminders ?? (user?.default_reminder_minutes != null ? [user.default_reminder_minutes] : []));
+  const [reminders, setReminders] = useState<number[]>(prefillEvent
+    ? prefillEvent.reminders ?? []
+    : user?.default_reminder_minutes != null ? [user.default_reminder_minutes] : []);
   const [allDay, setAllDay] = useState(prefillEvent?.all_day ?? false);
   const [startStr, setStartStr] = useState(defaultStartStr);
   const [endStr, setEndStr] = useState(defaultEndStr);
@@ -595,6 +598,7 @@ export function EventFormModal({
   const [description, setDescription] = useState(
     prefillEvent?.description ?? "",
   );
+  const [duration, setDuration] = useState(prefillEvent && !prefillEvent.all_day ? (new Date(defaultEndStr).getTime() - new Date(defaultStartStr).getTime()) / 60000 : user?.default_duration_minutes ?? 60);
   const [saving, setSaving] = useState(false);
 
   const initialRrule = parseRrule(prefillEvent?.rrule);
@@ -607,6 +611,28 @@ export function EventFormModal({
   const [recurExtraParts, setRecurExtraParts] = useState(initialRrule.extraParts);
 
   const summaryRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (editScope === null) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const viewport = window.visualViewport;
+    const resize = () => {
+      const backdrop = dialogRef.current?.parentElement;
+      if (backdrop && viewport) {
+        backdrop.style.height = `${viewport.height}px`;
+        backdrop.style.top = `${viewport.offsetTop}px`;
+      }
+    };
+    resize();
+    viewport?.addEventListener("resize", resize);
+    viewport?.addEventListener("scroll", resize);
+    return () => {
+      viewport?.removeEventListener("resize", resize);
+      viewport?.removeEventListener("scroll", resize);
+      previous?.focus();
+    };
+  }, [editScope]);
 
   useEffect(() => {
     if (editScope !== null) summaryRef.current?.focus();
@@ -626,22 +652,24 @@ export function EventFormModal({
       setEndStr(endStr.slice(0, 10));
     } else {
       setStartStr(`${startStr}T09:00`);
-      setEndStr(`${startStr}T10:00`);
+      setEndStr(addHour(`${startStr}T09:00`, duration));
     }
     setAllDay((v) => !v);
   };
 
   const handleStartChange = (val: string) => {
     setStartStr(val);
-    if (!allDay && val > endStr) setEndStr(addHour(val, user?.default_duration_minutes));
+    if (!allDay && Number.isFinite(new Date(val).getTime())) setEndStr(addHour(val, duration));
     if (allDay && val > endStr) setEndStr(val);
   };
 
   const buildPayload = (): CreateEventPayload => ({
     calendar_id: calendarId,
     summary: summary.trim(),
-    start: allDay ? startStr : localDatetimeToISO(startStr),
-    end: allDay
+    start: prefillEvent && allDay === prefillEvent.all_day && startStr === defaultStartStr
+      ? prefillEvent.start : allDay ? startStr : localDatetimeToISO(startStr),
+    end: prefillEvent && allDay === prefillEvent.all_day && endStr === defaultEndStr
+      ? prefillEvent.end : allDay
       ? (() => {
           const [y, m, d] = endStr.split("-").map(Number);
           const dt = new Date(y, m - 1, d + 1);
@@ -650,10 +678,11 @@ export function EventFormModal({
         })()
       : localDatetimeToISO(endStr),
     all_day: allDay,
-    location: location.trim() || null,
-    description: description.trim() || null,
+    location: location === prefillEvent?.location ? location : location.trim() || null,
+    description: description === prefillEvent?.description ? description : description.trim() || null,
     reminders,
-    rrule: buildRrule(recurFreq, recurUntil, recurCount, recurExtraParts),
+    rrule: recurFreq === initialRrule.freq && recurUntil === initialRrule.until && recurCount === initialRrule.count && recurExtraParts === initialRrule.extraParts
+      ? prefillEvent?.rrule ?? null : buildRrule(recurFreq, recurUntil, recurCount, recurExtraParts),
   });
 
   const overlap = useMemo(() => {
@@ -766,7 +795,7 @@ export function EventFormModal({
     onClose,
   ]);
 
-  const canSave = recurrenceValid && summary.trim().length > 0 && calendars.some(c => c.id === calendarId);
+  const canSave = (allDay || isEdit || (Number.isInteger(duration) && duration > 0)) && Number.isFinite(new Date(startStr).getTime()) && Number.isFinite(new Date(endStr).getTime()) && (allDay ? endStr >= startStr : endStr > startStr) && recurrenceValid && summary.trim().length > 0 && calendars.some(c => c.id === calendarId);
 
   if (editScope === null) {
     return (
@@ -779,13 +808,19 @@ export function EventFormModal({
 
   return (
     <div
-      className="modal-backdrop"
+      className="modal-backdrop event-form-backdrop"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="form-modal">
+      <div ref={dialogRef} className="form-modal event-form" onKeyDown={e => {
+        if (e.key !== "Tab") return;
+        const elements = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary')).filter(el => el.getClientRects().length > 0);
+        const first = elements[0], last = elements[elements.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+        if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+      }} role="dialog" aria-modal="true" aria-labelledby="event-form-title">
         {/* Header */}
         <div className="form-modal-header">
-          <h2 className="form-modal-title">
+          <h2 id="event-form-title" className="form-modal-title">
             {isEdit ? "Termin bearbeiten" : duplicateFrom ? "Termin duplizieren" : "Neuer Termin"}
           </h2>
           <button
@@ -797,6 +832,20 @@ export function EventFormModal({
           </button>
         </div>
 
+        <div className="event-form-body">
+        <fieldset className="event-calendars">
+          <legend className="form-label">Kalender</legend>
+          <div className="event-calendar-list">
+            {calendars.map(cal => <button type="button" key={cal.id}
+              className="event-calendar-choice" aria-pressed={calendarId === cal.id}
+              disabled={isEdit && existingEvent?.is_recurring}
+              onClick={() => { setCalendarId(cal.id); summaryRef.current?.focus(); }}>
+              <span className="event-calendar-dot" style={{ background: cal.color }} />{cal.name}
+            </button>)}
+          </div>
+          {!calendars.length && <p role="alert">Kein beschreibbarer Kalender verfügbar.</p>}
+          {isEdit && existingEvent?.is_recurring && <p className="form-hint">Wiederkehrende Termine können den Kalender nicht wechseln.</p>}
+        </fieldset>
         {/* Titel */}
         <div className="form-field">
           <label className="form-label" htmlFor="event-summary">
@@ -815,29 +864,6 @@ export function EventFormModal({
           />
         </div>
 
-        {/* Kalender */}
-        <div className="form-field">
-          <label className="form-label" htmlFor="event-calendar">
-            Kalender
-          </label>
-          <select
-            id="event-calendar"
-            className="form-select"
-            value={calendarId}
-            disabled={isEdit && existingEvent?.is_recurring}
-            onChange={(e) => setCalendarId(e.target.value)}
-          >
-            {calendars.map((cal) => (
-              <option key={cal.id} value={cal.id}>
-                {cal.name}
-              </option>
-            ))}
-          </select>
-          {isEdit && existingEvent?.is_recurring && (
-            <p className="form-hint">Wiederkehrende Termine können den Kalender nicht wechseln.</p>
-          )}
-        </div>
-
         {/* Datum/Zeit-Sektion */}
         <div className="form-section">
           <div className="form-section-head">
@@ -853,7 +879,7 @@ export function EventFormModal({
             </label>
           </div>
           <div className="form-date-row">
-            <span className="form-date-row-label">Von</span>
+            <span className="form-date-row-label">Datum{!allDay && " / Beginn"}</span>
             <div style={{ flex: 1 }}>
               <DateTimeField
                 value={startStr}
@@ -862,6 +888,12 @@ export function EventFormModal({
               />
             </div>
           </div>
+          {!allDay && !isEdit ? <div className="form-date-row">
+            <label className="form-date-row-label" htmlFor="event-duration">Dauer</label>
+            <input id="event-duration" type="number" min="1" step="1" className="form-input event-duration" value={duration}
+              onChange={e => { const minutes = Number(e.target.value); setDuration(minutes); if (minutes > 0 && startStr) setEndStr(addHour(startStr, minutes)); }} />
+            <span className="form-hint">Min. · Ende {endStr.slice(11,16)}{endStr.slice(0,10) !== startStr.slice(0,10) ? ` (${endStr.slice(0,10)})` : ""}</span>
+          </div> : <>
           <div className="form-date-row">
             <span className="form-date-row-label">Bis</span>
             <div style={{ flex: 1 }}>
@@ -869,10 +901,11 @@ export function EventFormModal({
                 value={endStr}
                 allDay={allDay}
                 min={startStr.slice(0, 10)}
-                onChange={setEndStr}
+                onChange={val => { setEndStr(val); if (!allDay) setDuration((new Date(val).getTime() - new Date(startStr).getTime()) / 60000); }}
               />
             </div>
           </div>
+          </>}
           {overlap && (
             <p className="form-hint">
               Kollidiert mit: {overlap.summary}, {overlap.time}
@@ -880,6 +913,10 @@ export function EventFormModal({
           )}
         </div>
 
+        <details className="event-more-options">
+          <summary>Weitere Optionen
+            <span className="form-hint">{[recurFreq !== "none" && "Wiederholung", location && "Ort", reminders.length > 0 && `${reminders.length} Erinnerung(en): ${reminders.map(n => n === 0 ? "zum Beginn" : `${n} Min. vorher`).join(", ")}`, description && "Beschreibung"].filter(Boolean).join(" · ")}</span>
+          </summary>
         {/* Wiederholung */}
         <div className="form-section">
           <label className="form-label">Wiederholung</label>
@@ -1007,6 +1044,8 @@ export function EventFormModal({
           />
         </div>
 
+        </details>
+        </div>
         {/* Footer */}
         <div className="form-modal-footer">
           <button className="btn-secondary" onClick={onClose}>
