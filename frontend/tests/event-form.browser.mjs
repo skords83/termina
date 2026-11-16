@@ -8,7 +8,7 @@ const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
 let payload;
 await page.route('**/api/events**', route => { payload = route.request().postDataJSON(); return route.fulfill({json:{uid:'test'}}); });
-const open = async (query='') => { await page.goto(`http://127.0.0.1:5173/tests/event-form.html${query}`); await page.getByRole('heading').waitFor(); };
+const open = async (query='') => { await page.goto(`http://127.0.0.1:5173/tests/event-form.html${query}`); await page.getByRole('heading').waitFor(); await page.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished))); };
 const save = async () => { await page.getByRole('button',{name:'Speichern', exact:true}).click(); await page.waitForFunction(() => window.saved); return payload; };
 const visibleActions = async () => {
   await page.waitForFunction(() => {
@@ -19,7 +19,7 @@ const visibleActions = async () => {
   const box = await page.getByRole('button',{name:'Speichern',exact:true}).boundingBox();
   assert(box && box.y >= 0 && box.y + box.height <= page.viewportSize().height);
 };
-for (const viewport of [{width:1280,height:800},{width:375,height:667},{width:320,height:568}]) {
+for (const viewport of [{width:1280,height:800},{width:360,height:667},{width:390,height:667},{width:320,height:568}]) {
   await page.setViewportSize(viewport);
   for (const [name,title,time,end] of [['Samu','Judo','17:30','18:30'],['Sophine','U9','09:30','10:30']]) {
     await open();
@@ -29,7 +29,7 @@ for (const viewport of [{width:1280,height:800},{width:375,height:667},{width:32
     await page.getByRole('button',{name,exact:true}).click();
     await page.locator('#event-summary').fill(title);
     await page.locator('input[type=time]').fill(time);
-    assert.equal(await page.locator('.event-form-body').evaluate(el=>el.scrollHeight <= el.clientHeight + 1),true);
+
     await visibleActions();
     const timeBox = await page.locator('input[type=time]').boundingBox();
     const formBox = await page.locator('.event-form-body').boundingBox();
@@ -41,6 +41,43 @@ for (const viewport of [{width:1280,height:800},{width:375,height:667},{width:32
     assert.equal(result.rrule,null); assert.deepEqual(result.reminders,[]);
   }
 }
+// Layout matrix: current fixture, another writable calendar, and long names.
+for (const viewport of [{width:1280,height:800},{width:320,height:568},{width:360,height:667},{width:390,height:667},{width:320,height:360}]) {
+  await page.setViewportSize(viewport);
+  for (const query of ['', '?extra', '?extra&long']) {
+    await open(query);
+    await visibleActions();
+    assert.equal(await page.locator('.event-calendar-choice').count(), query ? 5 : 4);
+    assert.equal(await page.locator('details').evaluate(el => el.open), false);
+    const overflow = await page.locator('.event-form').evaluate(form => {
+      const nodes = [form, ...form.querySelectorAll('.event-form-body, .event-calendar-list, .event-calendar-choice, .event-calendar-name, .form-date-row, .form-date-row-label')];
+      const bounds = form.getBoundingClientRect();
+      return nodes.filter(el => {
+        const box = el.getBoundingClientRect();
+        return el.scrollWidth > el.clientWidth + 1 || box.left < bounds.left || box.right > bounds.right;
+      }).map(el => el.className);
+    });
+    assert.deepEqual(overflow, [], `Overflow at ${viewport.width}: ${query}`);
+    for (const button of await page.locator('.event-calendar-choice').all()) {
+      const box = await button.boundingBox();
+      assert(box.height >= 44);
+    }
+    const target = page.locator('.event-calendar-choice').last();
+    await target.click();
+    assert.equal(await target.getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.locator('.event-calendar-choice[aria-pressed="true"]').count(), 1);
+    await page.locator('.event-form-body').evaluate(el => { el.scrollTop = 0; });
+    await page.screenshot({path:`/tmp/termina-layout-${viewport.width}x${viewport.height}-${query.includes('long') ? 'long' : query ? 'extra' : 'base'}.png`});
+    await page.locator('summary').scrollIntoViewIfNeeded();
+    await page.screenshot({path:`/tmp/termina-fields-${viewport.width}x${viewport.height}-${query.includes('long') ? 'long' : query ? 'extra' : 'base'}.png`});
+    await page.locator('summary').click();
+    await visibleActions();
+    await page.locator('.date-picker-trigger').first().click();
+    assert(await page.locator('.date-picker-panel').isVisible());
+    assert.equal(await page.locator('.event-form-body').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);
+  }
+}
+await page.setViewportSize({width:390,height:667});
 await open('?defaults');
 await page.locator('#event-summary').fill('Vorgaben');
 assert.match(await page.locator('summary').innerText(),/15 Min/);
